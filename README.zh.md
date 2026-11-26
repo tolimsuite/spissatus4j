@@ -1,0 +1,235 @@
+<p align="center">
+  <img src="assets/spissatus4j.svg" alt="spissatus4j" width="128">
+</p>
+
+<h1 align="center">spissatus4j</h1>
+
+<p align="center">
+  <strong>把密码学工程安全地封装好。</strong>
+</p>
+
+<p align="center">
+  一个 Java 25 加密工程封装库：在 JCA 与 Bouncy Castle 之上提供稳定、策略驱动、fail-closed 的统一 API。<br>
+  密钥、信封、Provider、国密算法与可选的 Spring Boot 集成 —— 不重造密码学原语。
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
+  <img alt="Java 25" src="https://img.shields.io/badge/Java-25-orange.svg">
+  <img alt="Gradle 9.9" src="https://img.shields.io/badge/Gradle-9.9-02303A.svg">
+  <img alt="Bouncy Castle 1.86" src="https://img.shields.io/badge/Bouncy_Castle-1.86-7A3E00.svg">
+  <img alt="Version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-success.svg">
+</p>
+
+<p align="center">
+  <a href="README.md">English</a> · <a href="README.zh.md"><strong>简体中文</strong></a>
+</p>
+
+<p align="center">
+  <a href="#安装">安装</a> ·
+  <a href="#快速开始">快速开始</a> ·
+  <a href="#架构">架构</a> ·
+  <a href="CONTRIBUTING.zh.md">参与贡献</a> ·
+  <a href="CHANGELOG.zh.md">变更日志</a> ·
+  <a href="LICENSE">许可证</a>
+</p>
+
+## spissatus4j 是什么
+
+spissatus4j 是一个**工程封装型密码库**，不是一套新的密码学。它在成熟的 JCA 与 Bouncy Castle 实现之上
+提供统一 API、默认安全参数与明确的运行边界。
+
+它面向 Java 应用，以依赖库的形式使用。核心不会启动服务器、不会暴露 HTTP 端点，也不要求 Spring。
+
+## 为什么选择 spissatus4j
+
+- **默认安全。** 默认使用 AES-256-GCM、ChaCha20-Poly1305、SM4-GCM；默认拒绝 ECB、DES、RC4、MD5、SHA-1；
+  RSA 签名密钥至少 2048 位。
+- **fail-closed。** 自检失败、策略源不可用、Nonce 复用或运行时不变式被破坏都会拒绝操作，而不是静默降级。
+- **完整的密钥生命周期。** 状态机、用途隔离、轮换、版本保留、包装、导入导出与销毁。
+- **处处认证。** 非 AEAD 模式统一 Encrypt-then-MAC；先验证、后解密。
+- **稳定契约。** 应用依赖 `spissatus4j-contract`，Provider 通过 SPI 可替换。
+
+## 架构
+
+```text
+                    ┌──────────────────────────────────────────────┐
+  应用        ───▶  │ spissatus4j-contract                         │
+                    │ 门面 · 值对象 · 枚举 · 异常 · SPI            │
+                    └──────────────────┬───────────────────────────┘
+                                       │
+                    ┌──────────────────▼───────────────────────────┐
+                    │ spissatus4j-core                             │
+                    │ 构建器 · fail-closed 运行时 · 策略  │
+                    │ 注册表 · 自检 · 流式编排                     │
+                    └───────┬───────────────┬──────────────────────┘
+                            │               │
+          ┌─────────────────▼───┐       ┌───▼─────────────────────┐
+          │ spissatus4j-crypto  │       │ spissatus4j-key         │
+          │ JCA 算法实现        │       │ 生命周期 · Provider     │
+          └─────────┬───────────┘       └─────────────────────────┘
+                    │
+        ┌───────────┴────────────┐
+        ▼                        ▼
+ spissatus4j-bouncycastle   spissatus4j-gm
+ BC/FIPS Provider           SM2 · SM3 · SM4
+
+ 支撑模块：spissatus4j-envelope、spissatus4j-policy、
+ spissatus4j-spring-boot-starter（可选）。
+```
+
+core 只依赖 contract；具体 Provider 通过 `SpissatusModule` / `AlgorithmProvider` 注册，
+默认构建器会从 classpath 自动发现。
+
+## 仓库结构
+
+| 模块 | 用途 |
+| --- | --- |
+| `spissatus4j-contract` | 稳定 API、值对象、密封异常与 SPI |
+| `spissatus4j-core` | 门面、构建器、fail-closed 运行时、注册表与默认策略 |
+| `spissatus4j-crypto` | JCA Provider：AEAD、Encrypt-then-MAC、哈希、MAC、签名、KDF、流式 |
+| `spissatus4j-key` | 密钥状态机、Provider、轮换、包装、导入导出、销毁 |
+| `spissatus4j-envelope` | 自描述 TLV/JSON 密文信封 |
+| `spissatus4j-policy` | 算法、用途、访问、租户与合规策略 |
+| `spissatus4j-bouncycastle` | Bouncy Castle Provider、FIPS 路由与互操作校验 |
+| `spissatus4j-gm` | SM2/SM3/SM4 Provider 与 GM/T 测试向量 |
+| `spissatus4j-spring-boot-starter` | **可选** Spring Boot 4 自动配置与 CLI |
+| `gradle/libs.versions.toml` | 依赖版本唯一来源 |
+| `assets/spissatus4j.svg` | 项目 Logo |
+
+## 环境要求
+
+- JDK 25
+- Gradle Wrapper 9.9（仓库自带）
+- 使用本库不需要应用服务器或数据库
+
+## 安装
+
+```groovy
+dependencies {
+    implementation 'cn.tolim.spissatus4j:spissatus4j-contract:0.1.0'
+    implementation 'cn.tolim.spissatus4j:spissatus4j-core:0.1.0'
+    implementation 'cn.tolim.spissatus4j:spissatus4j-crypto:0.1.0'
+    implementation 'cn.tolim.spissatus4j:spissatus4j-key:0.1.0'
+    implementation 'cn.tolim.spissatus4j:spissatus4j-envelope:0.1.0'
+    implementation 'cn.tolim.spissatus4j:spissatus4j-policy:0.1.0'
+    implementation 'cn.tolim.spissatus4j:spissatus4j-bouncycastle:0.1.0'
+    implementation 'cn.tolim.spissatus4j:spissatus4j-gm:0.1.0'
+}
+```
+
+可选附加模块：
+
+```groovy
+// Spring Boot 4 自动配置 + CLI
+implementation 'cn.tolim.spissatus4j:spissatus4j-spring-boot-starter:0.1.0'
+```
+
+## 快速开始
+
+```java
+CallerContext caller = CallerContext.system();
+try (Spissatus facade = SpissatusBuilders.builder()
+        .discoverModules(true)
+        .failClosed(true)
+        .build()) {
+
+    KeyDescriptor key = facade.keyManager().generate(
+        KeyGenerationRequest.builder(KeyType.AES, AlgorithmId.AES_GCM,
+                Set.of(KeyUsage.ENCRYPT, KeyUsage.DECRYPT))
+            .keyId(KeyId.of("order-aes"))
+            .tenantId(caller.tenantId())
+            .build(), caller);
+
+    byte[] plaintext = "hello".getBytes(StandardCharsets.UTF_8);
+    Envelope envelope = facade.encryptToEnvelope(
+        EncryptRequest.builder(AlgorithmId.AES_GCM, key.keyId(), plaintext, caller).build(),
+        EnvelopeFormat.JSON, BinaryEncoding.BASE64);
+
+    byte[] encoded = facade.envelopeService().encode(envelope, envelope.format());
+    byte[] decrypted = facade.decryptEnvelope(encoded, caller);
+}
+```
+
+默认密钥管理器使用内存 Provider，适合开发与测试。生产环境应配置 `file` 或 `keystore` 存储，
+或实现 KMS/Vault/HSM 的 `KeyProvider`。
+
+## Spring Boot Starter（可选）
+
+```yaml
+spissatus:
+  fail-closed: true
+  compliance-mode: STANDARD        # STANDARD | FIPS | GM | GM_HYBRID
+  keys:
+    provider: file                 # memory | file | environment | keystore | provided
+    file-directory: /var/lib/app/keys
+    master-password: ${SPISSATUS_MASTER_PASSWORD}
+  policy:
+    allow-anonymous: false
+    allowed-tenants: [tenant-a]
+    rate-limit-per-minute: 6000
+  self-check:
+    on-startup: true
+    failure-fails-startup: true
+  provider:
+    jca: true
+    bouncycastle: true
+    gm: true
+    fips: false
+```
+
+Starter 注册 `Spissatus` 与 `SpissatusLogSanitizer` Bean；不启动 Web 服务器，也不暴露 HTTP 端点。
+
+## 算法
+
+| 类别 | JCA | Bouncy Castle | GM/T |
+| --- | --- | --- | --- |
+| AEAD | AES-GCM、ChaCha20-Poly1305 | AES-GCM、ChaCha20-Poly1305 | SM4-GCM |
+| 分组（仅 EtM） | AES-CBC/CTR/CFB/OFB | — | SM4-CBC/CTR |
+| 非对称 | RSA-OAEP、RSA PKCS#1 v1.5 | RSA-OAEP、ECIES | SM2 |
+| 哈希 | SHA-256/384/512、SHA3-256/512 | SHAKE128/256、BLAKE2b | SM3 |
+| MAC | HMAC-SHA256/384/512 | HMAC、CMAC-AES | HMAC-SM3 |
+| 签名 | Ed25519、Ed448、ECDSA P-256/P-384、RSA-PSS | Ed448、ECDSA、RSA-PSS、RSA PKCS#1 v1.5 | SM2 |
+| KDF | PBKDF2、HKDF | Argon2id、scrypt、bcrypt、PBKDF2、HKDF | — |
+| 流式 | 分块 AEAD（12 字节 nonce） | — | — |
+
+后量子标识（`ML-KEM-768`、`ML-DSA-65`）与 `Kem`/`HybridKem` 契约已预留，默认拒绝，需显式开启。
+
+## 安全模型
+
+- **每个操作只做一次策略决策**，包括限流与租户检查。
+- **Nonce 跟踪**覆盖每次 AEAD/EtM 加密与每个流式 base nonce。
+- **Encrypt-then-MAC** 用于 AES-CBC/CTR/CFB/OFB 与 SM4-CBC/CTR，先恒定时间验证再解密。
+- **泛化认证失败**，不区分填充、Tag 与密钥错误。
+- **密钥状态与用途隔离**：仅 ACTIVE 密钥可保护新数据；DEACTIVATED 仅处理历史数据。
+- **FIPS 模式**只选择声明 `fipsCapable()` 的 Provider；没有 FIPS Provider 时启动失败。
+- **启动自检**校验 Provider；失败即 fail-closed。
+- **扩展信任**以模块实现类的完整类名为准，绝不信任自声明的 moduleId。
+
+## 构建与测试
+
+```bash
+./gradlew clean build              # 编译、测试、包名检查、jar
+./gradlew test                     # 全部模块测试
+./gradlew checkPackageNames        # 包名合规检查
+```
+
+所有模块必须保持 `cn.tolim.spissatus4j.` 包前缀；`checkPackageNames` 会强制检查。
+jar 带 `Automatic-Module-Name` 元数据。
+
+## 参与贡献
+
+提交 Pull Request 前请阅读 [CONTRIBUTING.zh.md](CONTRIBUTING.zh.md)。使用短生命周期分支与 Conventional
+Commits，依赖版本统一维护在 [`gradle/libs.versions.toml`](gradle/libs.versions.toml)。
+
+## 安全
+
+请勿在公开 Issue 中披露安全漏洞。请通过 <https://github.com/tolimsuite/spissatus4j> 的私密安全公告，
+或私下联系 TOLIM Technologies Pte. Ltd.，并提供复现步骤与受影响版本。禁止提交凭据、私钥或生产数据。
+
+## 许可证
+
+Copyright 2026 TOLIM Technologies Pte. Ltd.
+
+本项目按 [Apache License, Version 2.0](LICENSE) 授权。除非遵守许可证，否则不得使用本项目。
+署名信息见 [NOTICE](NOTICE)。
