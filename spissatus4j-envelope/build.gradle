@@ -1,0 +1,7 @@
+description = 'spissatus4j self-describing TLV/JSON ciphertext envelopes'
+
+dependencies {
+    api project(':spissatus4j-contract')
+    implementation project(':spissatus4j-core')
+    implementation libs.jackson.databind
+}
