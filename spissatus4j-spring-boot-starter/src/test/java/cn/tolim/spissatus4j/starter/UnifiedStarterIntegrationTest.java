@@ -120,7 +120,8 @@ class UnifiedStarterIntegrationTest {
 
     @Test
     void familyReuseMustBeExplicit() {
-        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+        runner.withPropertyValues("spissatus.keys.provider=memory",
+                "spissatus.selection.allow-family-reuse=true").run(context -> {
             Spissatus facade = context.getBean(Spissatus.class);
             KeyId aes = generate(facade, "family-aes", KeyType.AES, AlgorithmId.AES_GCM);
             byte[] plaintext = "family reuse".getBytes(StandardCharsets.UTF_8);
@@ -141,6 +142,69 @@ class UnifiedStarterIntegrationTest {
                     EnvelopeFormat.TLV);
             assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
                     .isEqualTo(plaintext);
+        });
+    }
+
+    @Test
+    void missingCandidateKeyDoesNotAbortAnOrderedList() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            KeyId valid = generate(facade, "candidate-valid", KeyType.AES, AlgorithmId.AES_GCM);
+            byte[] plaintext = "candidate fallback".getBytes(StandardCharsets.UTF_8);
+            UnifiedEncryptionResult result = facade.encrypt(UnifiedEncryptRequest.builder(
+                            java.util.List.of(KeyId.of("missing-key"), valid), plaintext, caller())
+                    .build());
+            assertThat(result.selection().selectedKeyId()).isEqualTo(valid);
+            byte[] encoded = facade.envelopeService().encode(result.envelope(),
+                    EnvelopeFormat.JSON);
+            assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
+                    .isEqualTo(plaintext);
+        });
+    }
+
+    @Test
+    void operatorFamilyReuseSettingIsACeiling() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            KeyId aes = generate(facade, "ceiling-aes", KeyType.AES, AlgorithmId.AES_GCM);
+            assertThatThrownBy(() -> facade.encrypt(UnifiedEncryptRequest.builder(
+                            aes, "ceiling".getBytes(StandardCharsets.UTF_8), caller())
+                    .algorithm(AlgorithmId.AES_CBC)
+                    .allowFamilyReuse(true)
+                    .build()))
+                    .isInstanceOfSatisfying(
+                            cn.tolim.spissatus4j.contract.exception.KeyException.class,
+                            failure -> assertThat(failure.errorCode())
+                                    .isEqualTo(ErrorCode.KEY_ALGORITHM_MISMATCH));
+        });
+    }
+
+    @Test
+    void crossTenantRoleCanUseTheUnifiedEntry() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            KeyId key = generate(facade, "cross-tenant-aes", KeyType.AES, AlgorithmId.AES_GCM);
+            CallerContext admin = CallerContext.of("admin", "other-tenant",
+                    java.util.Set.of("crypto-admin"));
+            byte[] plaintext = "cross tenant".getBytes(StandardCharsets.UTF_8);
+            UnifiedEncryptionResult result = facade.encrypt(UnifiedEncryptRequest.builder(
+                    key, plaintext, admin).build());
+            byte[] encoded = facade.envelopeService().encode(result.envelope(),
+                    EnvelopeFormat.JSON);
+            assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, admin).build()))
+                    .isEqualTo(plaintext);
+        });
+    }
+
+    @Test
+    void unifiedEntryRejectsAsymmetricAlgorithms() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            KeyId rsa = generate(facade, "unified-rsa", KeyType.RSA, AlgorithmId.RSA_OAEP);
+            assertThatThrownBy(() -> facade.encrypt(UnifiedEncryptRequest.builder(
+                            rsa, "asymmetric".getBytes(StandardCharsets.UTF_8), caller())
+                    .algorithm(AlgorithmId.RSA_OAEP).build()))
+                    .isInstanceOf(cn.tolim.spissatus4j.contract.exception.CryptoException.class);
         });
     }
 

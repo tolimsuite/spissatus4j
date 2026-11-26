@@ -305,7 +305,8 @@ class EnvelopeServiceTest {
                 .nonce(Nonce.empty())
                 .tag(new byte[0])
                 .build();
-        assertDoesNotThrow(() -> service.validate(asymmetric));
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.validate(asymmetric));
 
         Envelope legacyHash = aesGcmEnvelopeBuilder().algorithm(AlgorithmId.SHA_256)
                 .nonce(Nonce.empty())

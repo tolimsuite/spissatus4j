@@ -242,9 +242,9 @@ public final class DefaultSpissatus implements Spissatus {
         auditBestEffort(caller, envelope.algorithm(), envelope.keyVersion(),
                 AuditEventType.ENVELOPE_PARSED, AuditOutcome.SUCCESS, "Envelope parsed");
         AAD aad = envelope.aad();
-        if (envelope.version() == 2) {
+        if (EnvelopeMetadataVerifier.isBound(envelope)) {
             try {
-                EnvelopeMetadataVerifier.verifyV2(envelope);
+                EnvelopeMetadataVerifier.verifyBound(envelope);
                 aad = EnvelopeMetadataVerifier.effectiveAad(envelope);
             } catch (RuntimeException e) {
                 auditBestEffort(caller, envelope.algorithm(), envelope.keyVersion(),

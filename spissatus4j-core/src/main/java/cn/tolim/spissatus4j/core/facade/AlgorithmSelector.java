@@ -151,9 +151,7 @@ final class AlgorithmSelector {
             } catch (PolicyException e) {
                 throw e;
             } catch (KeyException e) {
-                if (e.errorCode() == ErrorCode.KEY_NOT_FOUND
-                        || e.errorCode() == ErrorCode.KEY_VERSION_NOT_FOUND
-                        || e.errorCode() == ErrorCode.KEY_PROVIDER_FAILURE) {
+                if (e.errorCode() == ErrorCode.KEY_PROVIDER_FAILURE) {
                     throw e;
                 }
                 candidates.add(new KeyCandidate(keyId, null, request.keyVersion(),
@@ -237,7 +235,9 @@ final class AlgorithmSelector {
     private static boolean familyAllowed(AlgorithmInfo info, SelectionProfile profile) {
         AlgorithmFamily family = info.family();
         if (profile == null) {
-            if (family == AlgorithmFamily.AEAD || family == AlgorithmFamily.ASYMMETRIC) {
+            // V2 binds metadata through AEAD/EtM AAD only. Asymmetric
+            // algorithms remain available through the legacy v1 path.
+            if (family == AlgorithmFamily.AEAD) {
                 return true;
             }
             return family == AlgorithmFamily.SYMMETRIC && viableEtm(info);
@@ -269,9 +269,6 @@ final class AlgorithmSelector {
         if (!key.supportsUsage(KeyUsage.ENCRYPT)) {
             return SelectionRejection.KEY_USAGE;
         }
-        if (!key.tenantId().equals(request.caller().tenantId())) {
-            return SelectionRejection.KEY_TENANT;
-        }
         if (key.expired(context.clock().instant())) {
             return SelectionRejection.KEY_EXPIRED;
         }
@@ -282,6 +279,8 @@ final class AlgorithmSelector {
             // into an allowed mode through family reuse.
             return SelectionRejection.KEY_ALGORITHM_MISMATCH;
         }
+        // Tenant access is enforced by peekForUse and the authoritative policy;
+        // a caller holding a configured cross-tenant role must remain usable.
         if (!algorithmMatches(key, algorithm, request)) {
             return SelectionRejection.KEY_ALGORITHM_MISMATCH;
         }

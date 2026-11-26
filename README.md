@@ -182,21 +182,33 @@ byte[] decrypted = facade.decrypt(
   filters `PROHIBITED`/`UNKNOWN`/compliance-disallowed/provider-unavailable/key-incompatible
   candidates and records a bounded `SelectionReport`; the crypto service then performs exactly one
   `PolicyEngine.evaluate` for the selected key. A policy denial is final: there is no fallback.
-- **Envelopes**: unified encryption produces a **v2** envelope. `headerHash` is a SHA-256 binding of
-  the version, algorithm, key id, creation time, salt/KDF metadata and attributes; the cipher uses a
-  domain-separated effective AAD built from that hash and the caller AAD. Tampering with routing or
-  metadata fails before decryption. Unified decrypt rejects legacy v1 envelopes unless
-  `allowLegacyV1(true)` is set; freshness checks require v2.
+- **Envelopes**: unified encryption produces a **v2** envelope for symmetric **AEAD/EtM** algorithms.
+  `headerHash` is a SHA-256 binding of the version, algorithm, key id, creation time, salt/KDF
+  metadata and attributes; the cipher uses a domain-separated effective AAD built from that hash and
+  the caller AAD. For these symmetric envelopes, tampering with routing or metadata fails before
+  decryption. Asymmetric algorithms remain available through the low-level API and v1 envelopes;
+  they are not valid v2 envelope algorithms. Unified decrypt rejects legacy v1 envelopes unless
+  `allowLegacyV1(true)` is set (and the operator setting also allows it); freshness checks require v2.
+- **Key version**: `keyVersion` is deliberately not part of `headerHash`; a wrong version is normally
+  detected because the key material differs and the tag fails. If version substitution matters,
+  pin it with `expectedKeyVersion`. Reused/imported key material that is identical across versions
+  cannot be distinguished by the tag alone.
 - **Profiles**: `AUTO_AEAD` (default), `AUTO_AEAD_THEN_ETM` (explicit opt-in for EtM-wrapped block
   modes), `FIPS_AEAD`, `GM_AEAD`, `GM_HYBRID_AEAD`. Automatic profiles never select asymmetric
-  algorithms, experimental/deprecated algorithms, or weaker modes.
+  algorithms, experimental/deprecated algorithms, or weaker modes. `selectionCapabilities()` lists
+  only profiles valid for the active compliance mode.
 - **Keys**: `keyId` or an explicit `candidateKeyIds` list. Automatic tenant-wide key listing is not
   performed in this version. Only ACTIVE keys protect new data; DEACTIVATED keys remain usable for
-  historical decryption.
+  historical decryption. A missing candidate key is recorded and the ordered list continues;
+  provider failures abort.
 - **Capabilities**: `facade.selectionCapabilities()` reports installed/compliant/available
   algorithms without exposing provider types.
 - **Settings**: `spissatus.selection.profile`, `preferred-algorithms`, `allow-deprecated`,
-  `allow-experimental`, `allow-family-reuse`, `allow-legacy-v1`, `max-candidates`.
+  `allow-experimental`, `allow-family-reuse`, `allow-legacy-v1`, `max-candidates`. The `allow-*`
+  settings are operator ceilings: a request flag must also be set. CLI flags set both sides.
+- **CLI migration**: `spissatus4j decrypt` now uses the unified entry and rejects v1 envelopes by
+  default; pass `--allow-legacy-v1` (which also enables the operator ceiling for that process) or
+  re-encrypt data as v2. The library `decryptEnvelope` still accepts v1 for compatibility.
 
 ## Spring Boot starter (optional)
 
