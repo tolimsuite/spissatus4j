@@ -129,7 +129,7 @@ final class DefaultUnifiedCryptoService {
                 auditSelectionFailure(request, outcome.report(), e);
                 metricsFailure(outcome.report(), "failure");
             } else if (encryptionFinished) {
-                auditEnvelopeFailure(request, selection.algorithm(), dataOrNull(e), e);
+                auditEnvelopeFailure(request, selection, e);
                 metricsFailure(outcome.report(), "failure");
             }
             throw e;
@@ -409,14 +409,14 @@ final class DefaultUnifiedCryptoService {
         appendAudit(builder.build(), false);
     }
 
-    private void auditEnvelopeFailure(UnifiedEncryptRequest request, AlgorithmId algorithm,
-                                      EncryptedData data, RuntimeException failure) {
+    private void auditEnvelopeFailure(UnifiedEncryptRequest request,
+                                      AlgorithmSelector.Selection selection,
+                                      RuntimeException failure) {
         AuditEvent.Builder builder = AuditEvent.builder(AuditEventType.ENVELOPE_CREATED,
                         AuditSeverity.ERROR, AuditOutcome.FAILURE)
                 .caller(request.caller())
-                .algorithm(algorithm)
-                .keyId(request.keyId())
-                .keyVersion(data == null ? null : data.keyVersion())
+                .algorithm(selection.algorithm())
+                .keyId(selection.keyId())
                 .operation(Operation.ENCRYPT)
                 .message("Envelope creation failed")
                 .detail("errorCode", errorCode(failure));
@@ -556,9 +556,5 @@ final class DefaultUnifiedCryptoService {
     private static String errorCode(RuntimeException failure) {
         return failure instanceof SpissatusException se
                 ? se.errorCode().name() : "INTERNAL_ERROR";
-    }
-
-    private static EncryptedData dataOrNull(RuntimeException failure) {
-        return null;
     }
 }

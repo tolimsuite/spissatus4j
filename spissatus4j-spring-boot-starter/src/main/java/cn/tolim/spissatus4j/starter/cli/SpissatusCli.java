@@ -6,8 +6,6 @@ import cn.tolim.spissatus4j.contract.algorithm.KeyUsage;
 import cn.tolim.spissatus4j.contract.api.Spissatus;
 import cn.tolim.spissatus4j.contract.api.SpissatusBuilder;
 import cn.tolim.spissatus4j.contract.compliance.ComplianceMode;
-import cn.tolim.spissatus4j.contract.crypto.DecryptRequest;
-import cn.tolim.spissatus4j.contract.crypto.EncryptRequest;
 import cn.tolim.spissatus4j.contract.crypto.SignRequest;
 import cn.tolim.spissatus4j.contract.crypto.VerifyRequest;
 import cn.tolim.spissatus4j.contract.envelope.BinaryEncoding;
@@ -23,6 +21,12 @@ import cn.tolim.spissatus4j.contract.key.KeyGenerationRequest;
 import cn.tolim.spissatus4j.contract.key.KeyId;
 import cn.tolim.spissatus4j.contract.key.KeyType;
 import cn.tolim.spissatus4j.contract.policy.CallerContext;
+import cn.tolim.spissatus4j.contract.unified.AlgorithmCandidate;
+import cn.tolim.spissatus4j.contract.unified.AlgorithmSuite;
+import cn.tolim.spissatus4j.contract.unified.SelectionProfile;
+import cn.tolim.spissatus4j.contract.unified.UnifiedDecryptRequest;
+import cn.tolim.spissatus4j.contract.unified.UnifiedEncryptRequest;
+import cn.tolim.spissatus4j.contract.unified.UnifiedEncryptionResult;
 import cn.tolim.spissatus4j.core.builder.SpissatusBuilders;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -33,6 +37,7 @@ import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.Security;
 import java.security.spec.X509EncodedKeySpec;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -122,10 +127,13 @@ public final class SpissatusCli {
                   --tenant <id>                  Caller tenant (default: default)
                   --compliance <mode>            STANDARD | FIPS | GM | GM_HYBRID
 
-                generate-key: --id <keyId> --algorithm <id> [--type <AES|SM4|RSA|EC|ED25519|ED448|SM2|HMAC>]
-                encrypt:      --key <keyId> --algorithm <id> --in <file> [--out <file>] [--aad <text>]
+                generate-key: --id <keyId> --algorithm <id> [--type <AES|SM4|RSA|EC|ED25519|ED448|SM2|HMAC|SYMMETRIC>]
+                              [--bits <n>]
+                encrypt:      (--key <keyId> | --keys <id,id>) --in <file> [--out <file>] [--aad <text>]
+                              [--algorithm <id> | --suite <id> | --profile <profile>]
+                              [--allow-deprecated] [--allow-experimental] [--allow-family-reuse]
                               [--format JSON|TLV] [--encoding BASE64|BASE64URL|HEX|RAW]
-                decrypt:      --in <file> [--out <file>]
+                decrypt:      --in <file> [--out <file>] [--allow-legacy-v1]
                 sign:         --key <keyId> --algorithm <id> --in <file> [--out <file>]
                 verify:       --algorithm <id> --in <file> --signature <file> (--key <keyId> | --public-key <der/pem>)
                 inspect:      --in <file>
@@ -151,6 +159,13 @@ public final class SpissatusCli {
                     "provider " + provider.providerId() + " priority=" + provider.priority()
                             + " health=" + provider.health()
                             + " algorithms=" + provider.algorithms().size()));
+            var selection = facade.selectionCapabilities();
+            out.println("selectionProfiles=" + selection.profiles());
+            selection.candidates().stream()
+                    .filter(AlgorithmCandidate::available)
+                    .limit(16)
+                    .forEach(candidate -> out.println("candidate " + candidate.info().id()
+                            + " rank=" + candidate.rank()));
         }
         return 0;
     }
@@ -181,10 +196,14 @@ public final class SpissatusCli {
                     "Algorithm cannot be used for key generation: " + algorithm.id());
         }
         String tenant = options.get("tenant", "default");
+        KeyGenerationRequest.Builder keyBuilder = KeyGenerationRequest.builder(type, algorithm, usages)
+                .keyId(KeyId.of(keyIdValue)).tenantId(tenant);
+        String bits = options.get("bits");
+        if (bits != null) {
+            keyBuilder.keyBits(parseBits(bits));
+        }
         try (Spissatus facade = build(options)) {
-            KeyDescriptor descriptor = facade.keyManager().generate(
-                    KeyGenerationRequest.builder(type, algorithm, usages)
-                            .keyId(KeyId.of(keyIdValue)).tenantId(tenant).build(),
+            KeyDescriptor descriptor = facade.keyManager().generate(keyBuilder.build(),
                     caller(tenant));
             out.println("keyId=" + descriptor.keyId() + " version=" + descriptor.version()
                     + " type=" + descriptor.type() + " algorithm=" + descriptor.algorithm()
@@ -200,18 +219,39 @@ public final class SpissatusCli {
     private static int encrypt(Options options, PrintStream out) throws IOException {
         Path input = Path.of(options.required("in"));
         byte[] plaintext = Files.readAllBytes(input);
-        AlgorithmId algorithm = AlgorithmId.of(options.required("algorithm"));
         String tenant = options.get("tenant", "default");
         EnvelopeFormat format = parseFormat(options.get("format", "JSON"));
         BinaryEncoding encoding = parseEncoding(options.get("encoding", "BASE64"));
-        EncryptRequest request = EncryptRequest.builder(algorithm,
-                        KeyId.of(options.required("key")), plaintext, caller(tenant))
-                .keyVersion(options.get("key-version") == null ? null
-                        : Long.parseLong(options.get("key-version")))
-                .aad(aad(options.get("aad")))
-                .build();
+        String singleKey = options.get("key");
+        String keyList = options.get("keys");
+        if ((singleKey == null) == (keyList == null)) {
+            throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
+                    "Exactly one of --key or --keys is required");
+        }
+        UnifiedEncryptRequest.Builder request = singleKey != null
+                ? UnifiedEncryptRequest.builder(KeyId.of(singleKey), plaintext, caller(tenant))
+                : UnifiedEncryptRequest.builder(parseKeyIds(keyList), plaintext, caller(tenant));
+        String keyVersion = options.get("key-version");
+        if (keyVersion != null) {
+            request.keyVersion(Long.parseLong(keyVersion));
+        }
+        if (options.get("algorithm") != null) {
+            request.algorithm(AlgorithmId.of(options.get("algorithm")));
+        } else if (options.get("suite") != null) {
+            request.suite(parseSuite(options.get("suite")));
+        }
+        if (options.get("profile") != null) {
+            request.profile(parseProfile(options.get("profile")));
+        }
+        request.aad(aad(options.get("aad")))
+                .format(format)
+                .encoding(encoding)
+                .allowDeprecated(options.flag("allow-deprecated"))
+                .allowExperimental(options.flag("allow-experimental"))
+                .allowFamilyReuse(options.flag("allow-family-reuse"));
         try (Spissatus facade = build(options)) {
-            Envelope envelope = facade.encryptToEnvelope(request, format, encoding);
+            UnifiedEncryptionResult result = facade.encrypt(request.build());
+            Envelope envelope = result.envelope();
             Path output = Path.of(options.get("out", input + ".spissatus"));
             if (encoding == BinaryEncoding.RAW) {
                 write(output, facade.envelopeService().encode(envelope, format));
@@ -219,8 +259,12 @@ public final class SpissatusCli {
                 write(output, facade.envelopeService().encodeText(envelope, format, encoding)
                         .getBytes(StandardCharsets.UTF_8));
             }
-            out.println("encrypted=" + input + " -> " + output + " format=" + format
-                    + " encoding=" + encoding + " ciphertextBytes=" + envelope.ciphertext().length);
+            out.println("encrypted=" + input + " -> " + output
+                    + " algorithm=" + result.selection().selectedAlgorithm()
+                    + " profile=" + result.selection().profileId()
+                    + " envelopeVersion=" + envelope.version()
+                    + " format=" + format + " encoding=" + encoding
+                    + " ciphertextBytes=" + envelope.ciphertext().length);
             return 0;
         }
     }
@@ -229,21 +273,19 @@ public final class SpissatusCli {
         Path input = Path.of(options.required("in"));
         byte[] bytes = Files.readAllBytes(input);
         String tenant = options.get("tenant", "default");
+        boolean allowLegacy = options.flag("allow-legacy-v1");
         try (Spissatus facade = build(options)) {
-            EnvelopeService service = facade.envelopeService();
             byte[] plaintext;
             try {
-                Envelope envelope = service.decode(bytes);
-                plaintext = facade.decryptEnvelope(bytes, caller(tenant));
-                out.println("envelope format=" + envelope.format()
-                        + " algorithm=" + envelope.algorithm() + " keyId=" + envelope.keyId()
-                        + " version=" + envelope.keyVersion());
+                plaintext = facade.decrypt(UnifiedDecryptRequest.builder(bytes, caller(tenant))
+                        .allowLegacyV1(allowLegacy).build());
             } catch (EnvelopeException rawFailure) {
-                Envelope envelope = service.decodeText(new String(bytes, StandardCharsets.UTF_8));
-                byte[] canonical = service.encode(envelope, envelope.format());
-                plaintext = facade.decryptEnvelope(canonical, caller(tenant));
-                out.println("envelope format=" + envelope.format()
-                        + " algorithm=" + envelope.algorithm() + " keyId=" + envelope.keyId());
+                if (rawFailure.errorCode() != ErrorCode.ENVELOPE_MALFORMED) {
+                    throw rawFailure;
+                }
+                plaintext = facade.decrypt(UnifiedDecryptRequest.builder(
+                                new String(bytes, StandardCharsets.UTF_8), caller(tenant))
+                        .allowLegacyV1(allowLegacy).build());
             }
             Path output = Path.of(options.get("out", input + ".plain"));
             write(output, plaintext);
@@ -301,6 +343,7 @@ public final class SpissatusCli {
             }
             Map<String, String> details = new LinkedHashMap<>();
             details.put("version", Integer.toString(envelope.version()));
+            details.put("headerHash", envelope.headerHash().length == 0 ? "absent" : "present");
             details.put("format", envelope.format().name());
             details.put("encoding", envelope.binaryEncoding().name());
             details.put("algorithm", envelope.algorithm().id());
@@ -327,11 +370,11 @@ public final class SpissatusCli {
                             KeyType.AES, AlgorithmId.AES_GCM, Set.of(KeyUsage.ENCRYPT, KeyUsage.DECRYPT))
                     .keyId(KeyId.of("demo-aes")).tenantId(tenant).build(), caller);
             byte[] plaintext = "spissatus4j demo plaintext".getBytes(StandardCharsets.UTF_8);
-            Envelope envelope = facade.encryptToEnvelope(EncryptRequest.builder(AlgorithmId.AES_GCM,
-                            aes.keyId(), plaintext, caller).build(),
-                    EnvelopeFormat.JSON, BinaryEncoding.BASE64);
-            byte[] decrypted = facade.decryptEnvelope(
-                    facade.envelopeService().encode(envelope, envelope.format()), caller);
+            UnifiedEncryptionResult encrypted = facade.encrypt(UnifiedEncryptRequest.builder(
+                            aes.keyId(), plaintext, caller).build());
+            Envelope envelope = encrypted.envelope();
+            byte[] decrypted = facade.decrypt(UnifiedDecryptRequest.builder(
+                    facade.envelopeService().encode(envelope, envelope.format()), caller).build());
             if (!java.util.Arrays.equals(plaintext, decrypted)) {
                 throw new IllegalStateException("roundtrip mismatch");
             }
@@ -349,6 +392,8 @@ public final class SpissatusCli {
             }
             out.println("DEMO OK state=" + facade.state() + " providers="
                     + facade.capabilities().providers().size()
+                    + " envelopeVersion=" + envelope.version()
+                    + " algorithm=" + encrypted.selection().selectedAlgorithm()
                     + " envelopeBytes=" + envelope.ciphertext().length
                     + " signatureBytes=" + signature.length);
             return 0;
@@ -411,6 +456,9 @@ public final class SpissatusCli {
         if (id.startsWith("SM4")) {
             return KeyType.SM4;
         }
+        if (id.equals("CHACHA20-POLY1305")) {
+            return KeyType.SYMMETRIC;
+        }
         if (id.startsWith("HMAC")) {
             return KeyType.HMAC;
         }
@@ -439,6 +487,52 @@ public final class SpissatusCli {
         } catch (IllegalArgumentException e) {
             throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
                     "Unsupported envelope format: " + value);
+        }
+    }
+
+    private static SelectionProfile parseProfile(String value) {
+        try {
+            return SelectionProfile.valueOf(value.trim().toUpperCase().replace('-', '_'));
+        } catch (IllegalArgumentException e) {
+            throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
+                    "Unsupported selection profile: " + value);
+        }
+    }
+
+    private static AlgorithmSuite parseSuite(String value) {
+        try {
+            return AlgorithmSuite.of(value);
+        } catch (IllegalArgumentException e) {
+            throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
+                    "Unsupported algorithm suite: " + value);
+        }
+    }
+
+    private static List<KeyId> parseKeyIds(String value) {
+        List<KeyId> keyIds = new ArrayList<>();
+        for (String part : value.split(",")) {
+            String trimmed = part.trim();
+            if (!trimmed.isEmpty()) {
+                keyIds.add(KeyId.of(trimmed));
+            }
+        }
+        if (keyIds.isEmpty()) {
+            throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
+                    "--keys must contain at least one key id");
+        }
+        return List.copyOf(keyIds);
+    }
+
+    private static int parseBits(String value) {
+        try {
+            int bits = Integer.parseInt(value.trim());
+            if (bits < 1) {
+                throw new NumberFormatException("non-positive");
+            }
+            return bits;
+        } catch (NumberFormatException e) {
+            throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
+                    "--bits must be a positive integer");
         }
     }
 
