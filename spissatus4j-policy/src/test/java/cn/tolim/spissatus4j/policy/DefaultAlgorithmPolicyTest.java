@@ -235,6 +235,13 @@ class DefaultAlgorithmPolicyTest {
         assertEquals("algorithm", policy.ruleId());
     }
 
+    @Test
+    void exposesAllowExperimentalFlag() {
+        assertFalse(policy.allowExperimental());
+        assertFalse(new DefaultAlgorithmPolicy(Set.of(), Set.of(), false).allowExperimental());
+        assertTrue(new DefaultAlgorithmPolicy(Set.of(), Set.of(), true).allowExperimental());
+    }
+
     private static PolicyRequest request(Operation operation, AlgorithmId algorithm) {
         return PolicyRequest.builder(operation, TestFixtures.caller()).algorithm(algorithm).build();
     }

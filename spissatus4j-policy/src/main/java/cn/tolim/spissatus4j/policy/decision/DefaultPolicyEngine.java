@@ -1,5 +1,10 @@
 package cn.tolim.spissatus4j.policy.decision;
 
+import cn.tolim.spissatus4j.contract.algorithm.AlgorithmCatalog;
+import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
+import cn.tolim.spissatus4j.contract.algorithm.AlgorithmInfo;
+import cn.tolim.spissatus4j.contract.policy.AlgorithmPolicy;
+import cn.tolim.spissatus4j.contract.policy.CallerContext;
 import cn.tolim.spissatus4j.contract.policy.PolicyDecision;
 import cn.tolim.spissatus4j.contract.policy.PolicyEngine;
 import cn.tolim.spissatus4j.contract.policy.PolicyProvider;
@@ -7,10 +12,13 @@ import cn.tolim.spissatus4j.contract.policy.PolicyRequest;
 import cn.tolim.spissatus4j.contract.policy.PolicyRule;
 import cn.tolim.spissatus4j.contract.policy.PolicySnapshot;
 import cn.tolim.spissatus4j.contract.policy.ReasonCodes;
+import cn.tolim.spissatus4j.contract.policy.SelectionHints;
 import cn.tolim.spissatus4j.contract.runtime.HealthStatus;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -84,6 +92,69 @@ public final class DefaultPolicyEngine implements PolicyEngine {
     /** Returns the immutable provider list. */
     public List<PolicyProvider> providers() {
         return providers;
+    }
+
+    /**
+     * Returns non-authoritative selection hints derived only from the locally
+     * configured rules.
+     *
+     * <p>This method is side-effect-free: it never calls
+     * {@link PolicyProvider#load()}, {@link PolicyProvider#refresh()},
+     * {@link PolicyProvider#health()}, {@link PolicyRule#health()} or
+     * {@link PolicyRule#evaluate(PolicyRequest)}, and it does not consume
+     * rate-limit state. Provider-supplied rules therefore cannot narrow
+     * selection; the authoritative {@link #evaluate(PolicyRequest)} call still
+     * applies them.</p>
+     *
+     * <p>Every local rule implementing {@link AlgorithmPolicy} contributes
+     * hints, merged with strictest-wins semantics. A rule that throws while
+     * its hints are collected is skipped: hints are advisory and must never
+     * crash selection. The authoritative evaluation of that rule still
+     * fails closed later.</p>
+     *
+     * @param caller caller context; local hints currently do not depend on it
+     * @return available hints identified by {@link #engineId()}; when no
+     *         algorithm policy exists the returned hints impose no restrictions
+     */
+    @Override
+    public SelectionHints selectionHints(CallerContext caller) {
+        SelectionHints merged = null;
+        for (PolicyRule rule : rules) {
+            if (!(rule instanceof AlgorithmPolicy algorithmPolicy)) {
+                continue;
+            }
+            try {
+                merged = SelectionHints.strictest(merged, selectionHintsOf(algorithmPolicy));
+            } catch (RuntimeException failure) {
+                // Advisory only: skip a broken hint source. evaluate() still
+                // fails closed when the authoritative rule is evaluated.
+            }
+        }
+        if (merged == null) {
+            return new SelectionHints(engineId, true, Set.of(), false, Set.of(), Map.of(), false);
+        }
+        return new SelectionHints(engineId, true, merged.allowedAlgorithms(),
+                merged.allowListPresent(), merged.deniedAlgorithms(),
+                merged.minimumKeyBits(), merged.allowExperimental());
+    }
+
+    private SelectionHints selectionHintsOf(AlgorithmPolicy policy) {
+        Set<AlgorithmId> allowed = policy.allowedAlgorithms();
+        boolean allowListPresent = allowed != null && !allowed.isEmpty();
+        Set<AlgorithmId> denied = policy.deniedAlgorithms();
+        Map<AlgorithmId, Integer> minimums = new LinkedHashMap<>();
+        for (AlgorithmInfo info : AlgorithmCatalog.all()) {
+            int required = policy.minimumKeyBits(info.id());
+            if (required > 0) {
+                minimums.put(info.id(), required);
+            }
+        }
+        return new SelectionHints(engineId, true,
+                allowListPresent ? allowed : Set.of(),
+                allowListPresent,
+                denied == null ? Set.of() : denied,
+                minimums,
+                policy.allowExperimental());
     }
 
     @Override
