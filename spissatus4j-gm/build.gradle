@@ -1,0 +1,7 @@
+description = 'spissatus4j Chinese GM/T algorithms: SM2, SM3 and SM4'
+
+dependencies {
+    api project(':spissatus4j-contract')
+    implementation project(':spissatus4j-core')
+    implementation libs.bouncycastle.bcprov
+}
