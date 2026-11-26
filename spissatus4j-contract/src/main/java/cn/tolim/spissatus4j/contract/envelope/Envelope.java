@@ -31,6 +31,7 @@ public final class Envelope {
     private final EnvelopeFormat format;
     private final BinaryEncoding binaryEncoding;
     private final Map<String, String> attributes;
+    private final byte[] headerHash;
 
     private Envelope(Builder builder) {
         this.version = builder.version;
@@ -47,6 +48,7 @@ public final class Envelope {
         this.format = Objects.requireNonNull(builder.format, "format");
         this.binaryEncoding = Objects.requireNonNull(builder.binaryEncoding, "binaryEncoding");
         this.attributes = Map.copyOf(Objects.requireNonNull(builder.attributes, "attributes"));
+        this.headerHash = builder.headerHash == null ? new byte[0] : builder.headerHash.clone();
         if (version < 1) {
             throw new IllegalArgumentException("Envelope version must be positive");
         }
@@ -112,6 +114,14 @@ public final class Envelope {
         return attributes;
     }
 
+    /**
+     * SHA-256 metadata binding for v2 envelopes. Empty for v1 envelopes.
+     * The value is metadata, never secret.
+     */
+    public byte[] headerHash() {
+        return headerHash.clone();
+    }
+
     public Envelope withEncoding(EnvelopeFormat newFormat, BinaryEncoding newEncoding) {
         return toBuilder().format(newFormat).binaryEncoding(newEncoding).build();
     }
@@ -120,7 +130,7 @@ public final class Envelope {
         return new Builder().version(version).algorithm(algorithm).keyId(keyId).keyVersion(keyVersion)
                 .nonce(nonce).salt(salt).kdfParameters(kdfParameters).aad(aad)
                 .ciphertext(ciphertext).tag(tag).createdAt(createdAt).format(format)
-                .binaryEncoding(binaryEncoding).attributes(attributes);
+                .binaryEncoding(binaryEncoding).attributes(attributes).headerHash(headerHash);
     }
 
     @Override
@@ -145,6 +155,7 @@ public final class Envelope {
         private EnvelopeFormat format = EnvelopeFormat.JSON;
         private BinaryEncoding binaryEncoding = BinaryEncoding.BASE64;
         private Map<String, String> attributes = Map.of();
+        private byte[] headerHash = new byte[0];
 
         public Builder version(int value) {
             this.version = value;
@@ -213,6 +224,11 @@ public final class Envelope {
 
         public Builder attributes(Map<String, String> value) {
             this.attributes = value;
+            return this;
+        }
+
+        public Builder headerHash(byte[] value) {
+            this.headerHash = value;
             return this;
         }
 
