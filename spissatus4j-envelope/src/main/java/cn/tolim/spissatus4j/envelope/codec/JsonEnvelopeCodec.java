@@ -46,9 +46,10 @@ import java.util.TreeMap;
  * <p>The JSON object contains exactly: {@code version}, {@code algorithm},
  * {@code keyId}, {@code keyVersion}, {@code nonce}, {@code salt}, {@code aad},
  * {@code ciphertext}, {@code tag}, {@code createdAt}, {@code kdf},
- * {@code attributes}, {@code format} and {@code encoding}. Binary values are
- * base64; timestamps are ISO-8601 instants. Unknown, duplicate or wrongly
- * typed fields are rejected.</p>
+ * {@code attributes}, {@code format} and {@code encoding}; version 2 envelopes
+ * additionally contain {@code headerHash}. Binary values are base64;
+ * timestamps are ISO-8601 instants. Unknown, duplicate or wrongly typed fields
+ * are rejected.</p>
  */
 public final class JsonEnvelopeCodec implements EnvelopeCodec {
 
@@ -56,10 +57,12 @@ public final class JsonEnvelopeCodec implements EnvelopeCodec {
 
     private static final String FORMAT_MARKER = "JSON";
     private static final String ENCODING_MARKER = "BASE64";
+    private static final String HEADER_HASH_FIELD = "headerHash";
 
     private static final Set<String> FIELDS = Set.of(
             "version", "algorithm", "keyId", "keyVersion", "nonce", "salt", "aad",
-            "ciphertext", "tag", "createdAt", "kdf", "attributes", "format", "encoding");
+            "ciphertext", "tag", "createdAt", "kdf", "attributes", "format", "encoding",
+            HEADER_HASH_FIELD);
 
     private static final Set<String> KDF_FIELDS = Set.of("algorithm", "parameters");
 
@@ -114,6 +117,9 @@ public final class JsonEnvelopeCodec implements EnvelopeCodec {
         try {
             ObjectNode root = mapper.createObjectNode();
             root.put("version", envelope.version());
+            if (envelope.version() >= 2) {
+                root.put(HEADER_HASH_FIELD, encodeBase64(envelope.headerHash()));
+            }
             root.put("algorithm", envelope.algorithm().id());
             root.put("keyId", envelope.keyId().value());
             root.put("keyVersion", envelope.keyVersion().value());
@@ -301,6 +307,9 @@ public final class JsonEnvelopeCodec implements EnvelopeCodec {
             }
         }
         for (String field : FIELDS) {
+            if (HEADER_HASH_FIELD.equals(field)) {
+                continue;
+            }
             if (!root.has(field)) {
                 throw malformed("Missing envelope field");
             }
@@ -309,6 +318,13 @@ public final class JsonEnvelopeCodec implements EnvelopeCodec {
         if (version < 1) {
             throw new EnvelopeException(ErrorCode.UNSUPPORTED_ENVELOPE_VERSION,
                     "Unsupported envelope version");
+        }
+        boolean hasHeaderHash = root.has(HEADER_HASH_FIELD);
+        if (version == 1 && hasHeaderHash) {
+            throw malformed("Version 1 envelopes must not contain a header hash");
+        }
+        if (version == 2 && !hasHeaderHash) {
+            throw malformed("Version 2 envelopes require a header hash");
         }
         long keyVersion = requireLong(root, "keyVersion");
         if (keyVersion < 1) {
@@ -336,7 +352,8 @@ public final class JsonEnvelopeCodec implements EnvelopeCodec {
                 .createdAt(parseInstant(requireText(root, "createdAt")))
                 .format(EnvelopeFormat.JSON)
                 .binaryEncoding(BinaryEncoding.RAW)
-                .attributes(parseAttributes(root.get("attributes")));
+                .attributes(parseAttributes(root.get("attributes")))
+                .headerHash(hasHeaderHash ? decodeBase64(root, HEADER_HASH_FIELD) : new byte[0]);
         return builder.build();
     }
 

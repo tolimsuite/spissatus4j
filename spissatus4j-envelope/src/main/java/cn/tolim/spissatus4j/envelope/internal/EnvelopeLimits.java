@@ -20,6 +20,9 @@ public final class EnvelopeLimits {
     /** Largest known parameter set (Argon2id) has five entries. */
     public static final int MAX_KDF_PARAMETERS = 16;
 
+    /** SHA-256 header hash carried by version 2 envelopes. */
+    public static final int MAX_HEADER_HASH_BYTES = 32;
+
     private EnvelopeLimits() {
     }
 }
