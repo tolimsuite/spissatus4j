@@ -1,0 +1,9 @@
+description = 'spissatus4j Bouncy Castle provider, FIPS routing and interoperability verification'
+
+dependencies {
+    api project(':spissatus4j-contract')
+    implementation project(':spissatus4j-core')
+    implementation libs.bouncycastle.bcprov
+    implementation libs.bouncycastle.bcpkix
+    implementation libs.bouncycastle.bcutil
+}
