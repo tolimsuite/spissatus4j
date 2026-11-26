@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - settings.gradle
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish to Maven Central and create GitHub release
+    if: github.repository == 'tolimsuite/spissatus4j'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      ORG_GRADLE_PROJECT_signingKey: ${{ secrets.SIGNING_KEY }}
+      ORG_GRADLE_PROJECT_signingPassword: ${{ secrets.SIGNING_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+
+          VERSION=$(sed -n "s/.*spissatusVersion[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" settings.gradle | head -n1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::No spissatusVersion found in settings.gradle"
+            exit 1
+          fi
+          if [[ "$VERSION" == *-SNAPSHOT ]]; then
+            echo "::error::Release version must not be a SNAPSHOT: $VERSION"
+            exit 1
+          fi
+
+          PREVIOUS=""
+          if git rev-parse -q --verify HEAD^ >/dev/null 2>&1; then
+            PREVIOUS=$(git show HEAD^:settings.gradle 2>/dev/null \
+              | sed -n "s/.*spissatusVersion[[:space:]]*=[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" \
+              | head -n1 || true)
+          fi
+
+          RELEASE=true
+          if [ "${{ github.event_name }}" != "workflow_dispatch" ] && [ "$PREVIOUS" = "$VERSION" ]; then
+            RELEASE=false
+          fi
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "Tag v$VERSION already exists; nothing to release."
+            RELEASE=false
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION previous=${PREVIOUS:-none} release=$RELEASE"
+
+      - name: Set up JDK 25
+        if: steps.version.outputs.release == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up Gradle
+        if: steps.version.outputs.release == 'true'
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build, test and stage
+        if: steps.version.outputs.release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${ORG_GRADLE_PROJECT_signingKey:?Missing SIGNING_KEY secret}"
+          : "${ORG_GRADLE_PROJECT_signingPassword:?Missing SIGNING_PASSWORD secret}"
+          ./gradlew clean build publishAllPublicationsToStagingRepository \
+            --no-daemon --stacktrace
+
+      - name: Create deployment bundle
+        if: steps.version.outputs.release == 'true'
+        id: bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          BUNDLE="${RUNNER_TEMP}/spissatus4j-${VERSION}-bundle.zip"
+          (cd build/staging-repo && zip -qr "$BUNDLE" .)
+          test -s "$BUNDLE"
+          echo "bundle=$BUNDLE" >> "$GITHUB_OUTPUT"
+          echo "Created $BUNDLE"
+
+      - name: Publish to Maven Central
+        if: steps.version.outputs.release == 'true'
+        id: central
+        shell: bash
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          set -euo pipefail
+          : "${MAVEN_CENTRAL_USERNAME:?Missing MAVEN_CENTRAL_USERNAME secret}"
+          : "${MAVEN_CENTRAL_PASSWORD:?Missing MAVEN_CENTRAL_PASSWORD secret}"
+          AUTH=$(printf '%s:%s' "${MAVEN_CENTRAL_USERNAME}" "${MAVEN_CENTRAL_PASSWORD}" | base64 | tr -d '\n')
+
+          RESPONSE=$(curl --silent --show-error --fail-with-body \
+            --request POST \
+            --header "Authorization: Bearer ${AUTH}" \
+            --form "bundle=@${{ steps.bundle.outputs.bundle }}" \
+            "https://central.sonatype.com/api/v1/publisher/upload?publishingType=AUTOMATIC")
+          echo "Central response: ${RESPONSE}"
+          DEPLOYMENT_ID=$(printf '%s' "$RESPONSE" | tr -d '[:space:]')
+          if [ -z "$DEPLOYMENT_ID" ]; then
+            echo "::error::Maven Central did not return a deployment id"
+            exit 1
+          fi
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for Central validation
+        if: steps.version.outputs.release == 'true'
+        shell: bash
+        env:
+          MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        run: |
+          set -euo pipefail
+          DEPLOYMENT_ID="${{ steps.central.outputs.deployment_id }}"
+          AUTH=$(printf '%s:%s' "${MAVEN_CENTRAL_USERNAME}" "${MAVEN_CENTRAL_PASSWORD}" | base64 | tr -d '\n')
+          for ATTEMPT in $(seq 1 60); do
+            STATUS=$(curl --silent --show-error --fail \
+              --request POST \
+              --header "Authorization: Bearer ${AUTH}" \
+              "https://central.sonatype.com/api/v1/publisher/status?id=${DEPLOYMENT_ID}" \
+              | jq -r '.deploymentState // empty' || true)
+            echo "Central state (attempt ${ATTEMPT}): ${STATUS}"
+            case "$STATUS" in
+              PUBLISHED) exit 0 ;;
+              FAILED) echo "::error::Maven Central validation failed"; exit 1 ;;
+            esac
+            sleep 20
+          done
+          echo "::error::Timed out waiting for Maven Central publication"
+          exit 1
+
+      - name: Create GitHub release
+        if: steps.version.outputs.release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.version.outputs.version }}"
+          gh release create "v$VERSION" \
+            --title "v$VERSION" \
+            --notes-file CHANGELOG.md
