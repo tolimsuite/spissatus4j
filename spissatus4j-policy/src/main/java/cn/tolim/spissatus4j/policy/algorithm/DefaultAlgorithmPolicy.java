@@ -94,6 +94,11 @@ public final class DefaultAlgorithmPolicy implements AlgorithmPolicy {
     }
 
     @Override
+    public boolean allowExperimental() {
+        return allowExperimental;
+    }
+
+    @Override
     public int minimumKeyBits(AlgorithmId algorithm) {
         if (algorithm == null) {
             return 0;
