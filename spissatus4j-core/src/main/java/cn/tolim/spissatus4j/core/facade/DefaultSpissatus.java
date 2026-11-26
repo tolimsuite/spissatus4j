@@ -18,6 +18,7 @@ import cn.tolim.spissatus4j.contract.envelope.Envelope;
 import cn.tolim.spissatus4j.contract.envelope.EnvelopeFormat;
 import cn.tolim.spissatus4j.contract.envelope.EnvelopeService;
 import cn.tolim.spissatus4j.contract.exception.ConfigurationException;
+import cn.tolim.spissatus4j.contract.exception.CryptoException;
 import cn.tolim.spissatus4j.contract.exception.EnvelopeException;
 import cn.tolim.spissatus4j.contract.exception.ErrorCode;
 import cn.tolim.spissatus4j.contract.key.KeyManager;
@@ -259,7 +260,11 @@ public final class DefaultSpissatus implements Spissatus {
                 .tag(envelope.tag())
                 .aad(aad)
                 .build();
-        return crypto.decrypt(request);
+        try {
+            return crypto.decrypt(request);
+        } catch (CryptoException e) {
+            throw DefaultUnifiedCryptoService.secureDecryptFailure(e);
+        }
     }
 
     private void auditBestEffort(CallerContext caller, AlgorithmId algorithm,

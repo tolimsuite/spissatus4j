@@ -8,7 +8,7 @@ branch `feature/unified-encrypt`; no release version was changed.
 
 | Area | Control | Verification |
 | --- | --- | --- |
-| Policy | Selection never calls `PolicyEngine.evaluate`; the crypto service performs exactly one authoritative decision per operation | `UnifiedEntryTest.onePolicyDecisionPerUnifiedOperation`; `RateLimitOneDecisionTest`-style starter tests |
+| Policy | Selection never calls `PolicyEngine.evaluate`; the crypto service performs exactly one authoritative decision per operation | `UnifiedEntryTest.onePolicyDecisionPerUnifiedOperation`; unified starter integration tests |
 | Downgrade | Explicit algorithm/suite has no fallback; policy denial never falls back to another key/algorithm; profiles exclude deprecated/experimental/prohibited and asymmetric algorithms | `AlgorithmSelector`; `UnifiedEntryTest.rejectsUnknownAndProhibitedExplicitAlgorithms` |
 | Key isolation | ACTIVE-only for protection, tenant/usage/expiry checks via `peekForUse`; candidate keys are explicitly supplied, never listed | `AlgorithmSelector.keyRejection`; `UnifiedEntryTest`; key module tests |
 | Envelope v2 | SHA-256 binding of version, algorithm, key id, creation time, salt/KDF, attributes; domain-separated effective AAD; key version/nonce/ciphertext remain tag-bound | `EnvelopeBindingTest` golden vector; envelope v2 codec tests; `UnifiedEntryTest.rejectsTamperedMetadataBeforeDecryption` |
