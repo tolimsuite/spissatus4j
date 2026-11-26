@@ -48,6 +48,7 @@ class SelectionCapabilitiesTest {
         assertTrue(aesCbc.compliant());
         assertEquals(-1, aesCbc.rank());
 
-        assertEquals(List.of(SelectionProfile.values()), selection.profiles());
+        assertEquals(List.of(SelectionProfile.AUTO_AEAD,
+                SelectionProfile.AUTO_AEAD_THEN_ETM), selection.profiles());
     }
 }

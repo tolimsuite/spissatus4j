@@ -12,6 +12,8 @@ All notable changes to spissatus4j are documented here.
   `AUTO_AEAD_THEN_ETM` / FIPS / GM profiles.
 - Envelope version 2 with a SHA-256 `headerHash` binding version, algorithm, key id, creation time,
   salt/KDF metadata and attributes; effective AAD is domain-separated and reconstructed on decrypt.
+  V2 envelopes are limited to symmetric AEAD/EtM algorithms; asymmetric algorithms remain on the
+  low-level API and v1 envelopes because they take no AAD.
 - Selection hints on `PolicyEngine` (non-authoritative, no rate-limit side effects); selection
   reports, capabilities view, audit events and bounded metrics.
 - Spring Boot `spissatus.selection.*` properties and CLI unified encrypt/decrypt, `--keys`,
@@ -20,8 +22,13 @@ All notable changes to spissatus4j are documented here.
 
 ### Security
 
-- V2 envelope metadata tampering is detected before decryption; v1 envelopes are rejected by the
-  unified entry unless explicitly allowed.
+- V2 envelope metadata tampering is detected before decryption for symmetric AEAD/EtM envelopes;
+  v1 envelopes are rejected by the unified entry unless both the request flag and the operator
+  ceiling allow them. The CLI now requires `--allow-legacy-v1` for v1 input.
+- `keyVersion` is not part of the v2 header hash; pin it with `expectedKeyVersion` when version
+  substitution matters.
+- Operator `spissatus.selection.allow-*` settings are hard ceilings; request flags cannot enable a
+  capability the operator disabled. CLI flags set both sides.
 - Unified decryption maps tag, padding and ciphertext failures to a generic authentication error.
 - One authoritative policy decision per unified operation; policy denials never fall back to another
   algorithm or key.

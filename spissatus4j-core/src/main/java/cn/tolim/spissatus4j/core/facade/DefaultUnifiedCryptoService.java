@@ -30,6 +30,7 @@ import cn.tolim.spissatus4j.contract.unified.SelectionReport;
 import cn.tolim.spissatus4j.contract.unified.UnifiedDecryptRequest;
 import cn.tolim.spissatus4j.contract.unified.UnifiedEncryptRequest;
 import cn.tolim.spissatus4j.contract.unified.UnifiedEncryptionResult;
+import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -158,8 +159,8 @@ final class DefaultUnifiedCryptoService {
         boolean legacy = envelope.version() == 1;
         AAD aad;
         try {
-            if (envelope.version() == 2) {
-                EnvelopeMetadataVerifier.verifyV2(envelope);
+            if (EnvelopeMetadataVerifier.isBound(envelope)) {
+                EnvelopeMetadataVerifier.verifyBound(envelope);
                 aad = EnvelopeMetadataVerifier.effectiveAad(envelope);
                 checkFreshness(envelope, request.maxAge());
             } else if (legacy) {
@@ -259,7 +260,16 @@ final class DefaultUnifiedCryptoService {
         }
         Instant now = context.clock().instant();
         Instant created = envelope.createdAt();
-        if (created.isAfter(now.plus(MAX_FUTURE_SKEW)) || created.isBefore(now.minus(maxAge))) {
+        Instant latest;
+        Instant earliest;
+        try {
+            latest = now.plus(MAX_FUTURE_SKEW);
+            earliest = now.minus(maxAge);
+        } catch (DateTimeException | ArithmeticException e) {
+            throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                    "Envelope is outside the accepted time window");
+        }
+        if (created.isAfter(latest) || created.isBefore(earliest)) {
             throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
                     "Envelope is outside the accepted time window");
         }

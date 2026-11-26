@@ -10,7 +10,8 @@ spissatus4j 的重要变更记录在此。
   从已安装、合规、已授权且与密钥兼容的能力中确定性选择唯一主算法；支持有序候选、命名套件与
   `AUTO_AEAD` / `AUTO_AEAD_THEN_ETM` / FIPS / GM profile。
 - 信封 v2：`headerHash` 以 SHA-256 绑定版本、算法、keyId、创建时间、salt/KDF 与属性；
-  有效 AAD 域分隔，解密时重建。
+  有效 AAD 域分隔，解密时重建。v2 仅限对称 AEAD/EtM；非对称算法因不接收 AAD，仍使用低层 API
+  与 v1 信封。
 - `PolicyEngine` 选择 hints（非权威、不产生限流副作用）；选择报告、能力视图、审计事件与有界指标。
 - Spring Boot `spissatus.selection.*` 配置；CLI 统一加密/解密、`--keys`、`--suite`、`--profile`
   与 `--allow-legacy-v1`。
@@ -18,7 +19,11 @@ spissatus4j 的重要变更记录在此。
 
 ### 安全
 
-- v2 信封元数据被篡改时在解密前发现；统一入口默认拒绝 v1 旧信封，除非显式允许。
+- 对称 AEAD/EtM 的 v2 信封元数据被篡改时在解密前发现；v1 旧信封需要请求标志与操作员上限同时
+  允许。CLI 解密 v1 需要 `--allow-legacy-v1`。
+- `keyVersion` 不进入 v2 `headerHash`；需要钉死版本时使用 `expectedKeyVersion`。
+- 操作员 `spissatus.selection.allow-*` 是硬上限；请求标志不能开启被操作员关闭的能力。CLI 标志
+  会同时设置两侧。
 - 统一解密将 tag、padding 与密文失败统一泛化为认证失败。
 - 每次统一操作仅一次权威策略决策；策略拒绝不切换到其他算法或密钥。
 - FIPS/GM 路由按合规模式与 Provider 能力过滤；`Capabilities.fipsAvailable` 改为反映已安装的

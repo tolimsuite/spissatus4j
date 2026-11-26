@@ -430,6 +430,18 @@ public final class SpissatusCli {
         } else {
             builder.setting("spissatus.key.provider", "memory");
         }
+        if (options.flag("allow-deprecated")) {
+            builder.setting("spissatus.selection.allow-deprecated", "true");
+        }
+        if (options.flag("allow-experimental")) {
+            builder.setting("spissatus.selection.allow-experimental", "true");
+        }
+        if (options.flag("allow-family-reuse")) {
+            builder.setting("spissatus.selection.allow-family-reuse", "true");
+        }
+        if (options.flag("allow-legacy-v1")) {
+            builder.setting("spissatus.selection.allow-legacy-v1", "true");
+        }
         return builder.build();
     }
 

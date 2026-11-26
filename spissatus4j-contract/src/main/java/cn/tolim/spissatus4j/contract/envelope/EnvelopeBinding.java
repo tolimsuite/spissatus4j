@@ -23,9 +23,12 @@ import java.util.TreeMap;
  * AEAD/EtM tag: version, algorithm, key id, creation time, salt, KDF parameters
  * and user attributes. The key version is deliberately excluded because lazy
  * rotation may select it during encryption; selecting the wrong key version is
- * detected by the tag because the key material differs. Nonces and ciphertext
- * are covered by the tag. Format and encoding are transport-level and are
- * validated structurally, not cryptographically.</p>
+ * normally detected by the tag because the key material differs. If two key
+ * versions share identical material, the tag cannot distinguish them; callers
+ * that require a specific version should pin it. Nonces and ciphertext are
+ * covered by the tag. Format and encoding are transport-level and are
+ * validated structurally, not cryptographically. The effective AAD binding is
+ * only meaningful for AEAD/EtM algorithms; asymmetric envelopes are not v2.</p>
  *
  * <p>The wire format is a library protocol; changing it requires a new domain
  * string and an envelope version.</p>

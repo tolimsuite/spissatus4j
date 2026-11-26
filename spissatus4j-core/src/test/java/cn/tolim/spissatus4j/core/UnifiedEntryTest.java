@@ -53,6 +53,7 @@ class UnifiedEntryTest {
                 .algorithmProvider(new TestAlgorithmProvider())
                 .keyManager(new TestKeyManager())
                 .envelopeService(envelopeService)
+                .setting("spissatus.selection.allow-legacy-v1", "true")
                 .build();
     }
 
@@ -191,6 +192,38 @@ class UnifiedEntryTest {
                     () -> facade.decrypt(UnifiedDecryptRequest.builder(encoded, CALLER)
                             .allowLegacyV1(true).maxAge(Duration.ofMinutes(1)).build()));
             assertEquals(ErrorCode.LEGACY_ENVELOPE_DENIED, freshness.errorCode());
+        }
+    }
+
+    @Test
+    void legacyV1RequiresTheOperatorSettingAsACeiling() {
+        try (Spissatus strict = SpissatusBuilders.builder()
+                .discoverModules(false)
+                .algorithmProvider(new TestAlgorithmProvider())
+                .keyManager(new TestKeyManager())
+                .envelopeService(new TestEnvelopeService())
+                .build()) {
+            byte[] plaintext = "legacy-ceiling".getBytes(StandardCharsets.UTF_8);
+            Envelope v1 = strict.encryptToEnvelope(EncryptRequest.builder(AlgorithmId.AES_GCM,
+                            TestKeyManager.KEY_ID, plaintext, CALLER).build(),
+                    EnvelopeFormat.JSON, BinaryEncoding.BASE64);
+            byte[] encoded = strict.envelopeService().encode(v1, EnvelopeFormat.JSON);
+            EnvelopeException denied = assertThrows(EnvelopeException.class,
+                    () -> strict.decrypt(UnifiedDecryptRequest.builder(encoded, CALLER)
+                            .allowLegacyV1(true).build()));
+            assertEquals(ErrorCode.LEGACY_ENVELOPE_DENIED, denied.errorCode());
+        }
+    }
+
+    @Test
+    void oversizedMaxAgeFailsClosedAsAnEnvelopeError() {
+        try (Spissatus facade = facade()) {
+            UnifiedEncryptionResult result = facade.encrypt(request(new byte[]{1}));
+            byte[] encoded = facade.envelopeService().encode(result.envelope(), EnvelopeFormat.JSON);
+            EnvelopeException failure = assertThrows(EnvelopeException.class,
+                    () -> facade.decrypt(UnifiedDecryptRequest.builder(encoded, CALLER)
+                            .maxAge(Duration.ofSeconds(Long.MAX_VALUE)).build()));
+            assertEquals(ErrorCode.ENVELOPE_VALIDATION_FAILED, failure.errorCode());
         }
     }
 

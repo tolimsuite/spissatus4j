@@ -70,19 +70,20 @@ final class SelectionSettings {
     }
 
     boolean allowDeprecated(UnifiedEncryptRequest request) {
-        return allowDeprecated || request.allowDeprecated();
+        // Operator configuration is a hard ceiling; the caller must also opt in.
+        return allowDeprecated && request.allowDeprecated();
     }
 
     boolean allowExperimental(UnifiedEncryptRequest request) {
-        return allowExperimental || request.allowExperimental();
+        return allowExperimental && request.allowExperimental();
     }
 
     boolean allowFamilyReuse(UnifiedEncryptRequest request) {
-        return allowFamilyReuse || request.allowFamilyReuse();
+        return allowFamilyReuse && request.allowFamilyReuse();
     }
 
     boolean allowLegacyV1(boolean requested) {
-        return allowLegacyV1 || requested;
+        return allowLegacyV1 && requested;
     }
 
     int maxCandidates() {

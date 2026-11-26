@@ -49,12 +49,19 @@ public record SelectionCapabilities(
                 .comparingInt((AlgorithmCandidate candidate) ->
                         candidate.rank() < 0 ? Integer.MAX_VALUE : candidate.rank())
                 .thenComparing(candidate -> candidate.info().id().id()));
+        List<SelectionProfile> profiles = new ArrayList<>();
+        for (SelectionProfile profile : SelectionProfile.values()) {
+            if (profile.allowedIn(mode)) {
+                profiles.add(profile);
+            }
+        }
         return new SelectionCapabilities(capabilities.serviceVersion(), mode,
-                List.copyOf(candidates), List.of(SelectionProfile.values()));
+                List.copyOf(candidates), List.copyOf(profiles));
     }
 
     private static boolean isEncryptionFamily(AlgorithmFamily family) {
-        return family == AlgorithmFamily.AEAD || family == AlgorithmFamily.SYMMETRIC
-                || family == AlgorithmFamily.ASYMMETRIC;
+        // Unified v2 envelopes authenticate metadata through AEAD/EtM AAD only;
+        // asymmetric algorithms are not unified-entry capabilities.
+        return family == AlgorithmFamily.AEAD || family == AlgorithmFamily.SYMMETRIC;
     }
 }

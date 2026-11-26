@@ -20,11 +20,11 @@ final class EnvelopeMetadataVerifier {
         return envelope.version() >= 2;
     }
 
-    static void verifyV2(Envelope envelope) {
+    static void verifyBound(Envelope envelope) {
         Objects.requireNonNull(envelope, "envelope");
-        if (envelope.version() != 2) {
+        if (!isBound(envelope)) {
             throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
-                    "Envelope is not a v2 bound envelope");
+                    "Envelope is not a bound envelope");
         }
         byte[] stored = envelope.headerHash();
         if (stored.length != EnvelopeBinding.HEADER_HASH_BYTES) {
