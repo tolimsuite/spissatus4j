@@ -12,5 +12,10 @@ public interface AlgorithmPolicy extends PolicyRule {
 
     int minimumKeyBits(AlgorithmId algorithm);
 
+    /** Whether this rule permits experimental algorithms; default is no. */
+    default boolean allowExperimental() {
+        return false;
+    }
+
     PolicyDecision evaluate(PolicyRequest request);
 }

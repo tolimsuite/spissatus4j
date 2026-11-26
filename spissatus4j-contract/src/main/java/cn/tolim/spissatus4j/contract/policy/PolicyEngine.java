@@ -13,6 +13,14 @@ public interface PolicyEngine {
 
     PolicyDecision evaluate(PolicyRequest request);
 
+    /**
+     * Non-authoritative selection hints. The crypto service still performs the
+     * single authoritative {@link #evaluate(PolicyRequest)} call.
+     */
+    default SelectionHints selectionHints(CallerContext caller) {
+        return SelectionHints.none();
+    }
+
     HealthStatus health();
 
     default void refresh() {

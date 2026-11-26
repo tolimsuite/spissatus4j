@@ -14,6 +14,9 @@ public final class MetricNames {
     public static final String AUDIT_EVENTS = "spissatus.audit.events";
     public static final String STREAM_BYTES = "spissatus.stream.bytes";
     public static final String STREAM_FAILURES = "spissatus.stream.failures";
+    public static final String ALGORITHM_SELECTIONS = "spissatus.selection.operations";
+    public static final String ALGORITHM_SELECTION_FAILURES = "spissatus.selection.rejections";
+    public static final String ENVELOPE_BINDING_FAILURES = "spissatus.envelope.binding.failures";
 
     private MetricNames() {
     }
