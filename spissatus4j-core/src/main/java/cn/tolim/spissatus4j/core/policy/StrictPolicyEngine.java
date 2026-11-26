@@ -1,5 +1,6 @@
 package cn.tolim.spissatus4j.core.policy;
 
+import cn.tolim.spissatus4j.contract.algorithm.AlgorithmCatalog;
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmInfo;
 import cn.tolim.spissatus4j.contract.algorithm.KeyUsage;
@@ -7,14 +8,19 @@ import cn.tolim.spissatus4j.contract.algorithm.Operation;
 import cn.tolim.spissatus4j.contract.algorithm.SecurityStatus;
 import cn.tolim.spissatus4j.contract.compliance.ComplianceMode;
 import cn.tolim.spissatus4j.contract.key.KeyDescriptor;
+import cn.tolim.spissatus4j.contract.policy.CallerContext;
 import cn.tolim.spissatus4j.contract.policy.PolicyDecision;
 import cn.tolim.spissatus4j.contract.policy.PolicyEngine;
 import cn.tolim.spissatus4j.contract.policy.PolicyRequest;
 import cn.tolim.spissatus4j.contract.policy.ReasonCodes;
+import cn.tolim.spissatus4j.contract.policy.SelectionHints;
 import cn.tolim.spissatus4j.contract.runtime.HealthStatus;
 import java.time.Clock;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Self-contained fallback policy used when the policy module is absent.
@@ -175,6 +181,18 @@ public final class StrictPolicyEngine implements PolicyEngine {
             case DERIVE_KEY -> KeyUsage.DERIVE;
             default -> null;
         };
+    }
+
+    @Override
+    public SelectionHints selectionHints(CallerContext caller) {
+        Map<AlgorithmId, Integer> minimums = new LinkedHashMap<>();
+        for (AlgorithmInfo info : AlgorithmCatalog.all()) {
+            if (info.minKeyBits() > 0) {
+                minimums.put(info.id(), info.minKeyBits());
+            }
+        }
+        return new SelectionHints("core-strict.selection", true, Set.of(), false, Set.of(),
+                Map.copyOf(minimums), false);
     }
 
     @Override
