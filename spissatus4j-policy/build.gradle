@@ -1,0 +1,6 @@
+description = 'spissatus4j algorithm, usage, access, tenant and compliance policy engine'
+
+dependencies {
+    api project(':spissatus4j-contract')
+    implementation project(':spissatus4j-core')
+}
