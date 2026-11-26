@@ -41,7 +41,8 @@ public enum SelectionProfile {
     public List<AlgorithmId> defaultOrder(ComplianceMode mode) {
         List<AlgorithmId> base = switch (this) {
             case AUTO_AEAD, AUTO_AEAD_THEN_ETM -> switch (mode) {
-                case STANDARD -> List.of(AlgorithmId.AES_GCM, AlgorithmId.CHACHA20_POLY1305);
+                case STANDARD -> List.of(AlgorithmId.AES_GCM,
+                        AlgorithmId.CHACHA20_POLY1305, AlgorithmId.SM4_GCM);
                 case FIPS -> List.of(AlgorithmId.AES_GCM);
                 case GM -> List.of(AlgorithmId.SM4_GCM);
                 case GM_HYBRID -> List.of(AlgorithmId.SM4_GCM, AlgorithmId.AES_GCM,
