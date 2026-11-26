@@ -147,6 +147,9 @@ public final class KeySupport {
         if (isSm4Algorithm(algorithm)) {
             return "SM4";
         }
+        if (algorithm.equals(AlgorithmId.CHACHA20_POLY1305)) {
+            return "ChaCha20";
+        }
         if (algorithm.equals(AlgorithmId.HMAC_SHA256)) {
             return "HmacSHA256";
         }
