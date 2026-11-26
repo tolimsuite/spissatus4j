@@ -994,6 +994,22 @@ public final class DefaultKeyManager implements KeyManager {
 
     private GeneratedMaterial generateSecret(KeyType type, AlgorithmId algorithm,
                                              int requestedBits) throws GeneralSecurityException {
+        if (algorithm.equals(AlgorithmId.CHACHA20_POLY1305)) {
+            int bits = requestedBits == 0 ? 256 : requestedBits;
+            if (bits != 256) {
+                throw new KeyException(ErrorCode.MIN_KEY_BITS_VIOLATION,
+                        "ChaCha20-Poly1305 keys must be 256 bits");
+            }
+            try {
+                KeyGenerator generator = KeyGenerator.getInstance("ChaCha20");
+                generator.init(256, RANDOM);
+                byte[] encoded = generator.generateKey().getEncoded();
+                return new GeneratedMaterial(KeyMaterialCodec.RAW, encoded, 256);
+            } catch (NoSuchAlgorithmException e) {
+                throw new KeyException(ErrorCode.ALGORITHM_UNSUPPORTED,
+                        "ChaCha20 key generation is not available");
+            }
+        }
         if (KeySupport.jcaKeyAlgorithm(algorithm, type).equals("AES")
                 && !algorithm.equals(AlgorithmId.CMAC_AES)) {
             int bits = requestedBits == 0 ? 256 : requestedBits;
