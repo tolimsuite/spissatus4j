@@ -6,6 +6,8 @@ import static cn.tolim.spissatus4j.envelope.TestEnvelopes.aesGcmEnvelopeBuilder;
 import static cn.tolim.spissatus4j.envelope.TestEnvelopes.assertErrorCode;
 import static cn.tolim.spissatus4j.envelope.TestEnvelopes.assertSameContents;
 import static cn.tolim.spissatus4j.envelope.TestEnvelopes.bytes;
+import static cn.tolim.spissatus4j.envelope.TestEnvelopes.v2AesGcmEnvelope;
+import static cn.tolim.spissatus4j.envelope.TestEnvelopes.v2AesGcmEnvelopeBuilder;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -157,23 +159,224 @@ class EnvelopeServiceTest {
     }
 
     @Test
-    void unsupportedVersionTwoIsRejectedOnEncodeAndDecode() {
-        Envelope versionTwo = aesGcmEnvelopeBuilder().version(2).build();
+    void unsupportedVersionThreeIsRejectedOnEncodeAndDecode() {
+        Envelope versionThree = v2AesGcmEnvelopeBuilder().version(3).build();
         assertErrorCode(ErrorCode.UNSUPPORTED_ENVELOPE_VERSION,
-                () -> service.encode(versionTwo, EnvelopeFormat.TLV));
+                () -> service.encode(versionThree, EnvelopeFormat.TLV));
 
-        byte[] tlv = service.encode(aesGcmEnvelope(), EnvelopeFormat.TLV);
+        byte[] tlv = service.encode(v2AesGcmEnvelope(), EnvelopeFormat.TLV);
         byte[] patched = tlv.clone();
         patched[8] = 0;
-        patched[9] = 2;
+        patched[9] = 3;
         assertErrorCode(ErrorCode.UNSUPPORTED_ENVELOPE_VERSION, () -> service.decode(patched));
 
-        String json = new String(service.encode(aesGcmEnvelope(), EnvelopeFormat.JSON),
+        String json = new String(service.encode(v2AesGcmEnvelope(), EnvelopeFormat.JSON),
                 StandardCharsets.UTF_8);
-        String versionTwoJson = json.replace("\"version\":1", "\"version\":2");
-        assertNotEquals(json, versionTwoJson);
+        String versionThreeJson = json.replace("\"version\":2", "\"version\":3");
+        assertNotEquals(json, versionThreeJson);
         assertErrorCode(ErrorCode.UNSUPPORTED_ENVELOPE_VERSION,
-                () -> service.decode(versionTwoJson.getBytes(StandardCharsets.UTF_8)));
+                () -> service.decode(versionThreeJson.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    void versionTwoRoundTripsThroughBothFormats() {
+        Envelope original = v2AesGcmEnvelope();
+        for (EnvelopeFormat format : EnvelopeFormat.values()) {
+            Envelope decoded = service.decode(service.encode(original, format));
+            assertSameContents(original, decoded);
+            assertEquals(2, decoded.version());
+            assertArrayEquals(original.headerHash(), decoded.headerHash());
+            assertEquals(format, decoded.format());
+        }
+    }
+
+    @Test
+    void versionTwoEncodeAddsOneHeaderHashEntry() {
+        byte[] versionOne = service.encode(aesGcmEnvelope(), EnvelopeFormat.TLV);
+        byte[] versionTwo = service.encode(v2AesGcmEnvelope(), EnvelopeFormat.TLV);
+        assertEquals(versionOne.length + 6 + 32, versionTwo.length);
+
+        int cap = versionOne.length + 20;
+        DefaultEnvelopeService bounded = new DefaultEnvelopeService(
+                List.of(new TlvEnvelopeCodec(cap), new JsonEnvelopeCodec(cap)),
+                new DefaultVersionPolicy(), cap);
+        assertDoesNotThrow(() -> bounded.encode(aesGcmEnvelope(), EnvelopeFormat.TLV));
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> bounded.encode(v2AesGcmEnvelope(), EnvelopeFormat.TLV));
+    }
+
+    @Test
+    void createBoundBuildsVersionTwoEnvelopeBoundToHeaderHash() {
+        EncryptedData data = EncryptedData.builder()
+                .algorithm(AlgorithmId.AES_GCM)
+                .keyId(KeyId.of("key-9"))
+                .keyVersion(KeyVersion.of(3))
+                .nonce(Nonce.of(bytes(12, 5)))
+                .ciphertext(bytes(20, 6))
+                .tag(bytes(16, 7))
+                .aad(AAD.ofUtf8("context"))
+                .createdAt(CREATED_AT)
+                .build();
+        byte[] headerHash = bytes(32, 12);
+        Envelope created = service.createBound(data, headerHash, Map.of("env", "bound"));
+        headerHash[0] ^= 0x7F;
+
+        assertEquals(2, created.version());
+        assertEquals(EnvelopeFormat.JSON, created.format());
+        assertEquals(BinaryEncoding.BASE64, created.binaryEncoding());
+        assertEquals(data.algorithm(), created.algorithm());
+        assertEquals(data.keyId(), created.keyId());
+        assertEquals(data.keyVersion(), created.keyVersion());
+        assertArrayEquals(data.nonce().asBytes(), created.nonce().asBytes());
+        assertArrayEquals(data.ciphertext(), created.ciphertext());
+        assertArrayEquals(data.tag(), created.tag());
+        assertArrayEquals(data.aad().asBytes(), created.aad().asBytes());
+        assertEquals(data.createdAt(), created.createdAt());
+        assertEquals(Map.of("env", "bound"), created.attributes());
+        assertArrayEquals(bytes(32, 12), created.headerHash(), "header hash must be cloned");
+        assertDoesNotThrow(() -> service.validate(created));
+
+        Envelope decoded = service.decode(service.encode(created, EnvelopeFormat.JSON));
+        assertArrayEquals(bytes(32, 12), decoded.headerHash());
+        assertSameContents(created, decoded);
+    }
+
+    @Test
+    void createBoundRejectsMissingOrWrongLengthHeaderHash() {
+        EncryptedData data = EncryptedData.builder()
+                .algorithm(AlgorithmId.AES_GCM)
+                .keyId(KeyId.of("key-9"))
+                .keyVersion(KeyVersion.first())
+                .nonce(Nonce.of(bytes(12, 5)))
+                .ciphertext(bytes(20, 6))
+                .tag(bytes(16, 7))
+                .createdAt(CREATED_AT)
+                .build();
+        assertErrorCode(ErrorCode.INVALID_PARAMETER,
+                () -> service.createBound(data, null, Map.of()));
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.createBound(data, new byte[31], Map.of()));
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.createBound(data, new byte[33], Map.of()));
+    }
+
+    @Test
+    void versionTwoRequiresExactlyThirtyTwoHeaderHashBytes() {
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.validate(v2AesGcmEnvelopeBuilder().headerHash(new byte[0]).build()));
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.validate(v2AesGcmEnvelopeBuilder().headerHash(bytes(31, 1)).build()));
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.validate(v2AesGcmEnvelopeBuilder().headerHash(bytes(33, 1)).build()));
+
+        Envelope versionOneWithHash = aesGcmEnvelopeBuilder().headerHash(bytes(32, 1)).build();
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.validate(versionOneWithHash));
+        assertDoesNotThrow(() -> service.validate(aesGcmEnvelope()));
+    }
+
+    @Test
+    void versionTwoRejectsNonEncryptionAlgorithmFamilies() {
+        Envelope hash = v2AesGcmEnvelopeBuilder().algorithm(AlgorithmId.SHA_256)
+                .nonce(Nonce.empty())
+                .tag(new byte[0])
+                .build();
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED, () -> service.validate(hash));
+
+        Envelope mac = v2AesGcmEnvelopeBuilder().algorithm(AlgorithmId.HMAC_SHA256)
+                .nonce(Nonce.empty())
+                .tag(bytes(32, 1))
+                .build();
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED, () -> service.validate(mac));
+
+        Envelope kem = v2AesGcmEnvelopeBuilder().algorithm(AlgorithmId.ML_KEM_768)
+                .nonce(Nonce.empty())
+                .tag(new byte[0])
+                .build();
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED, () -> service.validate(kem));
+
+        Envelope symmetric = v2AesGcmEnvelopeBuilder().algorithm(AlgorithmId.AES_CBC)
+                .nonce(Nonce.of(bytes(16, 1)))
+                .tag(bytes(32, 1))
+                .build();
+        assertDoesNotThrow(() -> service.validate(symmetric));
+
+        Envelope asymmetric = v2AesGcmEnvelopeBuilder().algorithm(AlgorithmId.RSA_OAEP)
+                .nonce(Nonce.empty())
+                .tag(new byte[0])
+                .build();
+        assertDoesNotThrow(() -> service.validate(asymmetric));
+
+        Envelope legacyHash = aesGcmEnvelopeBuilder().algorithm(AlgorithmId.SHA_256)
+                .nonce(Nonce.empty())
+                .tag(new byte[0])
+                .build();
+        assertDoesNotThrow(() -> service.validate(legacyHash),
+                "version 1 validation must remain unchanged");
+    }
+
+    @Test
+    void versionTwoRejectsReservedAttributePrefixes() {
+        for (String reserved : List.of("spissatus.origin", "spi4.origin", "spissatus.a", "spi4.a")) {
+            Envelope envelope = v2AesGcmEnvelopeBuilder()
+                    .attributes(Map.of(reserved, "value"))
+                    .build();
+            assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                    () -> service.validate(envelope));
+        }
+
+        Envelope versionOneReserved = aesGcmEnvelopeBuilder()
+                .attributes(Map.of("spissatus.origin", "value"))
+                .build();
+        assertDoesNotThrow(() -> service.validate(versionOneReserved),
+                "version 1 validation must remain unchanged");
+
+        Envelope similarKeys = v2AesGcmEnvelopeBuilder()
+                .attributes(Map.of("spissatus", "v", "spi4x", "v", "xspissatus.a", "v"))
+                .build();
+        assertDoesNotThrow(() -> service.validate(similarKeys));
+    }
+
+    @Test
+    void decodedVersionTwoEnvelopesWithWrongHeaderHashLengthAreRejected() {
+        Envelope tooShort = v2AesGcmEnvelopeBuilder().headerHash(bytes(31, 1)).build();
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.decode(new JsonEnvelopeCodec().encode(tooShort)));
+        assertErrorCode(ErrorCode.ENVELOPE_MALFORMED,
+                () -> service.decode(new TlvEnvelopeCodec().encode(tooShort)));
+
+        Envelope tooLong = v2AesGcmEnvelopeBuilder().headerHash(bytes(33, 1)).build();
+        assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                () -> service.decode(new JsonEnvelopeCodec().encode(tooLong)));
+        assertErrorCode(ErrorCode.ENVELOPE_MALFORMED,
+                () -> service.decode(new TlvEnvelopeCodec().encode(tooLong)));
+    }
+
+    @Test
+    void versionTwoTamperedMetadataFailsStructuralChecks() {
+        byte[] json = service.encode(v2AesGcmEnvelope(), EnvelopeFormat.JSON);
+        String text = new String(json, StandardCharsets.UTF_8);
+        String downgraded = text.replace("\"version\":2", "\"version\":1");
+        assertNotEquals(text, downgraded);
+        assertErrorCode(ErrorCode.ENVELOPE_MALFORMED,
+                () -> service.decode(downgraded.getBytes(StandardCharsets.UTF_8)));
+
+        String withoutHash = text.replaceAll("\"headerHash\":\"[^\"]*\",", "");
+        assertNotEquals(text, withoutHash);
+        assertErrorCode(ErrorCode.ENVELOPE_MALFORMED,
+                () -> service.decode(withoutHash.getBytes(StandardCharsets.UTF_8)));
+
+        byte[] tlv = service.encode(v2AesGcmEnvelope(), EnvelopeFormat.TLV);
+        byte[] versionOne = tlv.clone();
+        versionOne[8] = 0;
+        versionOne[9] = 1;
+        assertErrorCode(ErrorCode.ENVELOPE_MALFORMED, () -> service.decode(versionOne));
+
+        byte[] versionTwoWithoutHash = service.encode(aesGcmEnvelope(), EnvelopeFormat.TLV);
+        versionTwoWithoutHash[8] = 0;
+        versionTwoWithoutHash[9] = 2;
+        assertErrorCode(ErrorCode.ENVELOPE_MALFORMED,
+                () -> service.decode(versionTwoWithoutHash));
     }
 
     @Test
@@ -404,15 +607,23 @@ class EnvelopeServiceTest {
     void defaultServiceSupportsBothFormatsAndVersionPolicy() {
         DefaultEnvelopeService defaults = new DefaultEnvelopeService();
         assertNotNull(defaults.versionPolicy());
-        assertEquals(1, defaults.versionPolicy().currentVersion());
+        assertEquals(2, defaults.versionPolicy().currentVersion());
         assertTrue(defaults.supportsVersion(1));
-        assertFalse(defaults.supportsVersion(2));
-        assertTrue(defaults.versionPolicy().migrationHint(1).contains("current"));
-        assertFalse(defaults.versionPolicy().migrationHint(2).isEmpty());
+        assertTrue(defaults.supportsVersion(2));
+        assertFalse(defaults.supportsVersion(3));
+        assertTrue(defaults.versionPolicy().migrationHint(2).contains("current"));
+        String legacyHint = defaults.versionPolicy().migrationHint(1);
+        assertTrue(legacyHint.contains("unauthenticated"), legacyHint);
+        assertTrue(legacyHint.contains("re-encrypt"), legacyHint);
+        assertTrue(legacyHint.contains("unified API"), legacyHint);
+        assertFalse(defaults.versionPolicy().migrationHint(3).isEmpty());
 
         for (EnvelopeFormat format : EnvelopeFormat.values()) {
             Envelope decoded = defaults.decode(defaults.encode(aesGcmEnvelope(), format));
             assertSameContents(aesGcmEnvelope(), decoded);
+            Envelope bound = defaults.decode(defaults.encode(v2AesGcmEnvelope(), format));
+            assertSameContents(v2AesGcmEnvelope(), bound);
+            assertEquals(2, bound.version());
         }
     }
 

@@ -30,7 +30,8 @@ import java.util.TreeMap;
  * version, one format-hint byte ({@code 1} = TLV), int header length, TLV
  * header entries, int ciphertext length, ciphertext, int tag length, tag.
  * Header entries are {@code short tag, int length, bytes} with strictly
- * ascending tags. Tag {@code 10} is reserved and always rejected.</p>
+ * ascending tags. Tag {@code 10} is reserved and always rejected; tag
+ * {@code 11} carries the 32-byte header hash of version 2 envelopes.</p>
  */
 public final class TlvEnvelopeCodec implements EnvelopeCodec {
 
@@ -49,6 +50,7 @@ public final class TlvEnvelopeCodec implements EnvelopeCodec {
     private static final int TAG_ATTRIBUTES = 8;
     private static final int TAG_KDF = 9;
     private static final int TAG_RESERVED = 10;
+    private static final int TAG_HEADER_HASH = 11;
 
     private static final int MIN_ENVELOPE_BYTES = MAGIC.length + 2 + 1 + 4 + 4 + 4;
 
@@ -181,6 +183,7 @@ public final class TlvEnvelopeCodec implements EnvelopeCodec {
         boolean hasCreatedAt = false;
         byte[] attributes = null;
         byte[] kdf = null;
+        byte[] headerHash = null;
         int previousTag = 0;
 
         while (cursor.position() < headerEnd) {
@@ -193,7 +196,7 @@ public final class TlvEnvelopeCodec implements EnvelopeCodec {
                 throw malformed("Header tags must be strictly ascending");
             }
             previousTag = tag;
-            if (tag < TAG_ALGORITHM || tag > TAG_KDF) {
+            if (tag < TAG_ALGORITHM || tag > TAG_HEADER_HASH) {
                 throw malformed("Unknown header tag");
             }
             if (length < 0 || length > headerEnd - cursor.position()) {
@@ -223,6 +226,15 @@ public final class TlvEnvelopeCodec implements EnvelopeCodec {
                 case TAG_ATTRIBUTES -> attributes = value;
                 case TAG_KDF -> kdf = value;
                 case TAG_RESERVED -> throw malformed("Reserved header tag is not allowed");
+                case TAG_HEADER_HASH -> {
+                    if (version == 1) {
+                        throw malformed("Version 1 envelopes must not carry a header hash");
+                    }
+                    if (length != EnvelopeLimits.MAX_HEADER_HASH_BYTES) {
+                        throw malformed("Invalid header hash length");
+                    }
+                    headerHash = value;
+                }
                 default -> throw malformed("Unknown header tag");
             }
         }
@@ -231,6 +243,9 @@ public final class TlvEnvelopeCodec implements EnvelopeCodec {
         }
         if (algorithm == null || keyId == null || !hasKeyVersion || !hasCreatedAt) {
             throw malformed("Missing required header entry");
+        }
+        if (version == 2 && headerHash == null) {
+            throw malformed("Version 2 envelopes require a header hash");
         }
 
         int ciphertextLength = cursor.readInt();
@@ -260,7 +275,8 @@ public final class TlvEnvelopeCodec implements EnvelopeCodec {
                 .createdAt(Instant.ofEpochMilli(createdAt))
                 .format(EnvelopeFormat.TLV)
                 .binaryEncoding(BinaryEncoding.RAW)
-                .attributes(attributes == null ? Map.of() : decodeAttributes(attributes));
+                .attributes(attributes == null ? Map.of() : decodeAttributes(attributes))
+                .headerHash(headerHash == null ? new byte[0] : headerHash);
         if (kdf != null) {
             builder.kdfParameters(KdfCodec.fromCanonical(Utf8.decode(kdf)));
         }
@@ -287,6 +303,9 @@ public final class TlvEnvelopeCodec implements EnvelopeCodec {
         }
         if (envelope.kdfParameters() != null) {
             writeEntry(header, TAG_KDF, Utf8.encode(KdfCodec.canonicalize(envelope.kdfParameters())));
+        }
+        if (envelope.version() >= 2) {
+            writeEntry(header, TAG_HEADER_HASH, envelope.headerHash());
         }
         return header.toByteArray();
     }

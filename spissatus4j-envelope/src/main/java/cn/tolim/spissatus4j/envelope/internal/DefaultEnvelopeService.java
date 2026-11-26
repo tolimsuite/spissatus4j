@@ -1,5 +1,6 @@
 package cn.tolim.spissatus4j.envelope.internal;
 
+import cn.tolim.spissatus4j.contract.algorithm.AlgorithmFamily;
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmInfo;
 import cn.tolim.spissatus4j.contract.crypto.EncryptedData;
@@ -90,16 +91,6 @@ public final class DefaultEnvelopeService implements EnvelopeService {
         if (data == null) {
             throw new EnvelopeException(ErrorCode.INVALID_PARAMETER, "Encrypted data is required");
         }
-        Map<String, String> attributeCopy;
-        if (attributes == null) {
-            attributeCopy = Map.of();
-        } else {
-            try {
-                attributeCopy = Map.copyOf(attributes);
-            } catch (RuntimeException e) {
-                throw new EnvelopeException(ErrorCode.INVALID_PARAMETER, "Invalid envelope attributes");
-            }
-        }
         return Envelope.builder()
                 .version(1)
                 .algorithm(data.algorithm())
@@ -112,8 +103,49 @@ public final class DefaultEnvelopeService implements EnvelopeService {
                 .createdAt(data.createdAt())
                 .format(EnvelopeFormat.JSON)
                 .binaryEncoding(BinaryEncoding.BASE64)
-                .attributes(attributeCopy)
+                .attributes(copyAttributes(attributes))
                 .build();
+    }
+
+    @Override
+    public Envelope createBound(EncryptedData data, byte[] headerHash,
+                                Map<String, String> attributes) {
+        if (data == null) {
+            throw new EnvelopeException(ErrorCode.INVALID_PARAMETER, "Encrypted data is required");
+        }
+        if (headerHash == null) {
+            throw new EnvelopeException(ErrorCode.INVALID_PARAMETER, "Header hash is required");
+        }
+        if (headerHash.length != EnvelopeLimits.MAX_HEADER_HASH_BYTES) {
+            throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                    "Header hash length is invalid");
+        }
+        return Envelope.builder()
+                .version(2)
+                .algorithm(data.algorithm())
+                .keyId(data.keyId())
+                .keyVersion(data.keyVersion())
+                .nonce(data.nonce())
+                .ciphertext(data.ciphertext())
+                .tag(data.tag())
+                .aad(data.aad())
+                .createdAt(data.createdAt())
+                .format(EnvelopeFormat.JSON)
+                .binaryEncoding(BinaryEncoding.BASE64)
+                .attributes(copyAttributes(attributes))
+                .headerHash(headerHash)
+                .build();
+    }
+
+    private static Map<String, String> copyAttributes(Map<String, String> attributes) {
+        if (attributes == null) {
+            return Map.of();
+        }
+        try {
+            return Map.copyOf(attributes);
+        } catch (RuntimeException e) {
+            throw new EnvelopeException(ErrorCode.INVALID_PARAMETER, "Invalid envelope attributes");
+        }
     }
 
     @Override
@@ -251,6 +283,18 @@ public final class DefaultEnvelopeService implements EnvelopeService {
             throw new EnvelopeException(ErrorCode.UNSUPPORTED_ENVELOPE_VERSION,
                     "Unsupported envelope version: " + version);
         }
+        byte[] headerHash = envelope.headerHash();
+        if (version == 1) {
+            if (headerHash.length != 0) {
+                throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                        "Version 1 envelopes must not carry a header hash");
+            }
+        } else if (version >= 2) {
+            if (headerHash.length != EnvelopeLimits.MAX_HEADER_HASH_BYTES) {
+                throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                        "Version 2 envelopes require a 32-byte header hash");
+            }
+        }
         AlgorithmId algorithm = envelope.algorithm();
         if (algorithm == null || !algorithm.isKnown()) {
             throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
@@ -261,6 +305,14 @@ public final class DefaultEnvelopeService implements EnvelopeService {
                     "Envelope creation time is required");
         }
         AlgorithmInfo info = algorithm.info();
+        if (version >= 2) {
+            AlgorithmFamily family = info.family();
+            if (family != AlgorithmFamily.AEAD && family != AlgorithmFamily.SYMMETRIC
+                    && family != AlgorithmFamily.ASYMMETRIC) {
+                throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                        "Version 2 envelopes require an encryption algorithm");
+            }
+        }
         if (info.nonceBytes() > 0 && envelope.nonce().length() != info.nonceBytes()) {
             throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
                     "Envelope nonce length does not match the algorithm");
@@ -274,6 +326,9 @@ public final class DefaultEnvelopeService implements EnvelopeService {
                     "Key derivation metadata requires a non-empty salt");
         }
         validateAttributes(envelope.attributes());
+        if (version >= 2) {
+            validateReservedAttributes(envelope.attributes());
+        }
         if (estimateSize(envelope) > maxBytes) {
             throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
                     "Envelope exceeds the maximum size");
@@ -338,6 +393,15 @@ public final class DefaultEnvelopeService implements EnvelopeService {
         }
     }
 
+    private static void validateReservedAttributes(Map<String, String> attributes) {
+        for (String key : attributes.keySet()) {
+            if (key.startsWith("spissatus.") || key.startsWith("spi4.")) {
+                throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                        "Version 2 envelopes must not use reserved attribute prefixes");
+            }
+        }
+    }
+
     private static long estimateSize(Envelope envelope) {
         // Exact size of the canonical TLV representation: fixed framing bytes
         // plus one entry (6-byte tag/length prefix) per populated header field.
@@ -345,6 +409,9 @@ public final class DefaultEnvelopeService implements EnvelopeService {
         size += 6L + Utf8.length(envelope.algorithm().id());
         size += 6L + Utf8.length(envelope.keyId().value());
         size += 6L + 8L;
+        if (envelope.version() >= 2) {
+            size += 6L + EnvelopeLimits.MAX_HEADER_HASH_BYTES;
+        }
         if (envelope.nonce().length() > 0) {
             size += 6L + envelope.nonce().length();
         }

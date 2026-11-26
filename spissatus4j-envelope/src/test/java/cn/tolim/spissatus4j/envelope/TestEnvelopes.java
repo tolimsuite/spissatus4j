@@ -61,6 +61,16 @@ final class TestEnvelopes {
                 .attributes(Map.of("purpose", "unit-test", "tenant", "acme"));
     }
 
+    static Envelope v2AesGcmEnvelope() {
+        return v2AesGcmEnvelopeBuilder().build();
+    }
+
+    static Envelope.Builder v2AesGcmEnvelopeBuilder() {
+        return aesGcmEnvelopeBuilder()
+                .version(2)
+                .headerHash(bytes(32, 10));
+    }
+
     static Envelope simpleAesGcmEnvelope() {
         return Envelope.builder()
                 .version(1)
@@ -87,6 +97,7 @@ final class TestEnvelopes {
         assertArrayEquals(expected.aad().asBytes(), actual.aad().asBytes());
         assertArrayEquals(expected.ciphertext(), actual.ciphertext());
         assertArrayEquals(expected.tag(), actual.tag());
+        assertArrayEquals(expected.headerHash(), actual.headerHash());
         assertEquals(expected.createdAt(), actual.createdAt());
         assertEquals(expected.attributes(), actual.attributes());
         if (expected.kdfParameters() == null) {

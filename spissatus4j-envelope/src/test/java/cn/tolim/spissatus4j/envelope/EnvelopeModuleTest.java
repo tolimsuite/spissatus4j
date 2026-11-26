@@ -108,13 +108,16 @@ class EnvelopeModuleTest {
     @Test
     void defaultVersionPolicyBehavior() {
         DefaultVersionPolicy policy = new DefaultVersionPolicy();
-        assertEquals(1, policy.currentVersion());
+        assertEquals(2, policy.currentVersion());
         assertTrue(policy.isSupported(1));
+        assertTrue(policy.isSupported(2));
         assertFalse(policy.isSupported(0));
-        assertFalse(policy.isSupported(2));
-        assertTrue(policy.migrationHint(1).contains("no migration"));
+        assertFalse(policy.isSupported(3));
+        assertTrue(policy.migrationHint(2).contains("no migration"));
+        assertTrue(policy.migrationHint(1).contains("unauthenticated"));
+        assertTrue(policy.migrationHint(1).contains("unified API"));
         assertFalse(policy.migrationHint(0).isEmpty());
-        assertFalse(policy.migrationHint(2).isEmpty());
+        assertFalse(policy.migrationHint(3).isEmpty());
     }
 
     @Test
