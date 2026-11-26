@@ -2,10 +2,12 @@ package cn.tolim.spissatus4j.core.policy;
 
 import cn.tolim.spissatus4j.contract.policy.PolicyDecision;
 import cn.tolim.spissatus4j.contract.policy.PolicyEngine;
+import cn.tolim.spissatus4j.contract.policy.CallerContext;
 import cn.tolim.spissatus4j.contract.policy.PolicyProvider;
 import cn.tolim.spissatus4j.contract.policy.PolicyRule;
 import cn.tolim.spissatus4j.contract.policy.PolicySnapshot;
 import cn.tolim.spissatus4j.contract.policy.ReasonCodes;
+import cn.tolim.spissatus4j.contract.policy.SelectionHints;
 import cn.tolim.spissatus4j.contract.runtime.HealthStatus;
 import java.util.ArrayList;
 import java.util.List;
@@ -85,6 +87,16 @@ public final class ContributorPolicyEngine implements PolicyEngine {
             return id == null || id.isBlank() ? "unknown" : id;
         } catch (RuntimeException e) {
             return "unknown";
+        }
+    }
+
+    @Override
+    public SelectionHints selectionHints(CallerContext caller) {
+        try {
+            return base.selectionHints(caller);
+        } catch (RuntimeException e) {
+            // Hints are non-authoritative; the authoritative evaluate call fails closed.
+            return SelectionHints.none();
         }
     }
 

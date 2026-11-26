@@ -9,6 +9,7 @@ import cn.tolim.spissatus4j.contract.audit.AuditEventType;
 import cn.tolim.spissatus4j.contract.audit.AuditOutcome;
 import cn.tolim.spissatus4j.contract.audit.AuditSeverity;
 import cn.tolim.spissatus4j.contract.audit.AuditTrail;
+import cn.tolim.spissatus4j.contract.crypto.AAD;
 import cn.tolim.spissatus4j.contract.crypto.DecryptRequest;
 import cn.tolim.spissatus4j.contract.crypto.EncryptRequest;
 import cn.tolim.spissatus4j.contract.crypto.StreamCipherService;
@@ -27,6 +28,9 @@ import cn.tolim.spissatus4j.contract.runtime.RuntimeState;
 import cn.tolim.spissatus4j.contract.runtime.SelfCheckReport;
 import cn.tolim.spissatus4j.contract.spi.AlgorithmProvider;
 import cn.tolim.spissatus4j.contract.spi.SpissatusModule;
+import cn.tolim.spissatus4j.contract.unified.UnifiedDecryptRequest;
+import cn.tolim.spissatus4j.contract.unified.UnifiedEncryptRequest;
+import cn.tolim.spissatus4j.contract.unified.UnifiedEncryptionResult;
 import cn.tolim.spissatus4j.core.runtime.DefaultFailClosedGuard;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -45,6 +49,7 @@ public final class DefaultSpissatus implements Spissatus {
     private final FacadeContext context;
     private final DefaultFailClosedGuard guard;
     private final DefaultCryptoService crypto;
+    private final DefaultUnifiedCryptoService unified;
     private final Capabilities capabilities;
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -52,6 +57,7 @@ public final class DefaultSpissatus implements Spissatus {
         this.context = Objects.requireNonNull(context, "context");
         this.guard = Objects.requireNonNull(guard, "guard");
         this.crypto = new DefaultCryptoService(context);
+        this.unified = new DefaultUnifiedCryptoService(context, crypto);
         this.capabilities = buildCapabilities();
     }
 
@@ -183,6 +189,16 @@ public final class DefaultSpissatus implements Spissatus {
     }
 
     @Override
+    public UnifiedEncryptionResult encrypt(UnifiedEncryptRequest request) {
+        return unified.encrypt(request);
+    }
+
+    @Override
+    public byte[] decrypt(UnifiedDecryptRequest request) {
+        return unified.decrypt(request);
+    }
+
+    @Override
     public Envelope encryptToEnvelope(EncryptRequest request, EnvelopeFormat format,
                                       BinaryEncoding encoding) {
         Objects.requireNonNull(request, "request");
@@ -224,12 +240,24 @@ public final class DefaultSpissatus implements Spissatus {
         }
         auditBestEffort(caller, envelope.algorithm(), envelope.keyVersion(),
                 AuditEventType.ENVELOPE_PARSED, AuditOutcome.SUCCESS, "Envelope parsed");
+        AAD aad = envelope.aad();
+        if (envelope.version() == 2) {
+            try {
+                EnvelopeMetadataVerifier.verifyV2(envelope);
+                aad = EnvelopeMetadataVerifier.effectiveAad(envelope);
+            } catch (RuntimeException e) {
+                auditBestEffort(caller, envelope.algorithm(), envelope.keyVersion(),
+                        AuditEventType.ENVELOPE_BINDING_FAILED, AuditOutcome.FAILURE,
+                        "Envelope metadata authentication failed");
+                throw e;
+            }
+        }
         DecryptRequest request = DecryptRequest.builder(envelope.algorithm(), envelope.keyId(),
                         envelope.ciphertext(), caller)
                 .keyVersion(envelope.keyVersion())
                 .nonce(envelope.nonce())
                 .tag(envelope.tag())
-                .aad(envelope.aad())
+                .aad(aad)
                 .build();
         return crypto.decrypt(request);
     }

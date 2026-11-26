@@ -94,7 +94,16 @@ public final class DefaultCryptoService implements CryptoService {
 
     @Override
     public EncryptedData encrypt(EncryptRequest request) {
+        return encrypt(request, context.clock().instant());
+    }
+
+    /**
+     * Internal variant that pins the creation time so the unified entry point
+     * can bind the same instant into the envelope metadata hash.
+     */
+    EncryptedData encrypt(EncryptRequest request, Instant createdAt) {
         Objects.requireNonNull(request, "request");
+        Objects.requireNonNull(createdAt, "createdAt");
         long started = System.nanoTime();
         try {
             ready("encrypt");
@@ -110,7 +119,7 @@ public final class DefaultCryptoService implements CryptoService {
             KeyDescriptor key = authorizeKey(Operation.ENCRYPT, request.algorithm(),
                     request.keyId(), request.keyVersion(), KeyUsage.ENCRYPT, request.caller(),
                     request.attributes());
-            EncryptedData data = doEncrypt(request, info, key);
+            EncryptedData data = doEncrypt(request, info, key, createdAt);
             auditSuccess(AuditEventType.ENCRYPT, Operation.ENCRYPT, request.caller(),
                     request.algorithm(), key.version(), "Encryption completed");
             metricsSuccess(Operation.ENCRYPT, request.algorithm(), started);
@@ -123,7 +132,8 @@ public final class DefaultCryptoService implements CryptoService {
         }
     }
 
-    private EncryptedData doEncrypt(EncryptRequest request, AlgorithmInfo info, KeyDescriptor key) {
+    private EncryptedData doEncrypt(EncryptRequest request, AlgorithmInfo info, KeyDescriptor key,
+                                    Instant createdAt) {
         if (info.family() == AlgorithmFamily.ASYMMETRIC) {
             if (!request.aad().isEmpty()) {
                 throw new CryptoException(ErrorCode.INVALID_PARAMETER,
@@ -147,7 +157,7 @@ public final class DefaultCryptoService implements CryptoService {
                     .ciphertext(ciphertext)
                     .tag(new byte[0])
                     .aad(AAD.empty())
-                    .createdAt(context.clock().instant())
+                    .createdAt(createdAt)
                     .build();
         }
 
@@ -175,7 +185,7 @@ public final class DefaultCryptoService implements CryptoService {
                 .ciphertext(result.ciphertext())
                 .tag(result.tag())
                 .aad(request.aad())
-                .createdAt(context.clock().instant())
+                .createdAt(createdAt)
                 .build();
     }
 
