@@ -1,0 +1,5 @@
+description = 'spissatus4j core runtime: facade, builder, registry, self-check and fail-closed runtime'
+
+dependencies {
+    api project(':spissatus4j-contract')
+}
