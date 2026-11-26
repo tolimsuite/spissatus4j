@@ -1,0 +1,6 @@
+description = 'spissatus4j JCA-backed algorithms: AEAD, EtM, hashes, MACs, signatures, KDFs and streams'
+
+dependencies {
+    api project(':spissatus4j-contract')
+    implementation project(':spissatus4j-core')
+}
