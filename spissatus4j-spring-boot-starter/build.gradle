@@ -1,0 +1,19 @@
+description = 'spissatus4j optional Spring Boot 4 starter: auto-configuration, properties and CLI'
+
+dependencies {
+    api project(':spissatus4j-core')
+    api project(':spissatus4j-crypto')
+    api project(':spissatus4j-key')
+    api project(':spissatus4j-envelope')
+    api project(':spissatus4j-policy')
+    api project(':spissatus4j-bouncycastle')
+    api project(':spissatus4j-gm')
+
+    api libs.spring.boot.autoconfigure
+    api libs.spring.boot
+
+    annotationProcessor libs.spring.boot.configuration.processor
+
+    testImplementation libs.spring.boot.starter.test
+    testImplementation project(':spissatus4j-contract')
+}
