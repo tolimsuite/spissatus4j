@@ -347,7 +347,7 @@ final class DefaultUnifiedCryptoService {
                 "No eligible algorithm/key combination");
     }
 
-    private static CryptoException secureDecryptFailure(CryptoException failure) {
+    static CryptoException secureDecryptFailure(CryptoException failure) {
         ErrorCode code = failure.errorCode();
         if (code == ErrorCode.AUTHENTICATION_FAILED || code == ErrorCode.TAG_INVALID
                 || code == ErrorCode.INVALID_CIPHERTEXT || code == ErrorCode.DECRYPTION_FAILED) {
