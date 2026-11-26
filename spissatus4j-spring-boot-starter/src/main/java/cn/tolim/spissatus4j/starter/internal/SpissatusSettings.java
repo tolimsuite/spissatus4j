@@ -57,7 +57,8 @@ public final class SpissatusSettings {
         settings.put("spissatus.envelope.max-bytes", Integer.toString(envelope.getMaxBytes()));
 
         SpissatusProperties.Selection selection = properties.getSelection();
-        settings.put("spissatus.selection.profile", selection.getProfile());
+        settings.put("spissatus.selection.profile",
+                selection.getProfile() == null ? "" : selection.getProfile());
         settings.put("spissatus.selection.preferred-algorithms",
                 csv(selection.getPreferredAlgorithms()));
         settings.put("spissatus.selection.allow-deprecated",

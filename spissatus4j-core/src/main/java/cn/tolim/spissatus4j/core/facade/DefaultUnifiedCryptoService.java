@@ -103,12 +103,10 @@ final class DefaultUnifiedCryptoService {
 
         EncryptedData data;
         Envelope envelope;
-        boolean encryptionStarted = false;
-        boolean encryptionFinished = false;
+        boolean encryptionCompleted = false;
         try {
-            encryptionStarted = true;
             data = crypto.encrypt(encryptBuilder.build(), createdAt);
-            encryptionFinished = true;
+            encryptionCompleted = true;
             try {
                 envelope = envelopeService.createBound(data, headerHash, request.attributes());
             } catch (EnvelopeException e) {
@@ -125,10 +123,7 @@ final class DefaultUnifiedCryptoService {
             envelope = envelope.withEncoding(request.format(), request.encoding());
             envelopeService.validate(envelope);
         } catch (RuntimeException e) {
-            if (!encryptionStarted) {
-                auditSelectionFailure(request, outcome.report(), e);
-                metricsFailure(outcome.report(), "failure");
-            } else if (encryptionFinished) {
+            if (encryptionCompleted) {
                 auditEnvelopeFailure(request, selection, e);
                 metricsFailure(outcome.report(), "failure");
             }
@@ -184,11 +179,18 @@ final class DefaultUnifiedCryptoService {
         } catch (EnvelopeException e) {
             if (e.errorCode() == ErrorCode.ENVELOPE_BINDING_MISMATCH) {
                 auditBindingFailure(request.caller(), envelope, e);
+            } else {
+                auditParseFailure(request.caller(), e);
             }
             throw e;
         }
 
-        checkExpectedContext(request, envelope);
+        try {
+            checkExpectedContext(request, envelope);
+        } catch (EnvelopeException e) {
+            auditParseFailure(request.caller(), e);
+            throw e;
+        }
         auditParseSuccess(request.caller(), envelope);
         if (legacy) {
             auditLegacyAccepted(request.caller(), envelope);
@@ -306,6 +308,8 @@ final class DefaultUnifiedCryptoService {
                             ErrorCode.ALGORITHM_PROHIBITED, "Algorithm is prohibited");
                     case ALGORITHM_EXPERIMENTAL -> new PolicyException(
                             ErrorCode.ALGORITHM_EXPERIMENTAL, "Algorithm is experimental");
+                    case ALGORITHM_DEPRECATED -> new PolicyException(
+                            ErrorCode.ALGORITHM_DEPRECATED, "Algorithm is deprecated");
                     case COMPLIANCE_MODE -> new PolicyException(
                             ErrorCode.COMPLIANCE_MODE_DENIED,
                             "Algorithm is not allowed by the compliance mode");
@@ -318,8 +322,10 @@ final class DefaultUnifiedCryptoService {
                             ErrorCode.KEY_USAGE_VIOLATION, "Key type is not compatible");
                     case KEY_SIZE -> new PolicyException(
                             ErrorCode.MIN_KEY_BITS_VIOLATION, "Key size is below the minimum");
-                    case KEY_NOT_ACTIVE -> new KeyException(
+                    case KEY_NOT_ACTIVE, KEY_EXPIRED -> new KeyException(
                             ErrorCode.KEY_NOT_ACTIVE, "Key is not active for encryption");
+                    case KEY_NOT_FOUND -> new KeyException(
+                            ErrorCode.KEY_NOT_FOUND, "Key was not found");
                     case KEY_USAGE -> new KeyException(
                             ErrorCode.KEY_USAGE_VIOLATION, "Key usage does not permit encryption");
                     case KEY_TENANT -> new PolicyException(
@@ -329,6 +335,9 @@ final class DefaultUnifiedCryptoService {
                             "Algorithm is not supported by any healthy provider");
                     case ALGORITHM_UNKNOWN -> new CryptoException(
                             ErrorCode.ALGORITHM_UNKNOWN, "Algorithm is not registered");
+                    case AAD_UNSUPPORTED -> new CryptoException(
+                            ErrorCode.INVALID_PARAMETER,
+                            "AAD is not supported by the selected algorithm");
                     default -> new CryptoException(ErrorCode.ALGORITHM_SELECTION_FAILED,
                             "No eligible algorithm/key combination");
                 };

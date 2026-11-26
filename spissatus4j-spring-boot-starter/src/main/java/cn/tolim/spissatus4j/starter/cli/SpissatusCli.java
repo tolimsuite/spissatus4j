@@ -235,12 +235,18 @@ public final class SpissatusCli {
         if (keyVersion != null) {
             request.keyVersion(Long.parseLong(keyVersion));
         }
+        int explicitIntents = (options.get("algorithm") == null ? 0 : 1)
+                + (options.get("suite") == null ? 0 : 1);
+        if (explicitIntents > 1
+                || (explicitIntents > 0 && options.get("profile") != null)) {
+            throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
+                    "Choose only one of --algorithm, --suite or --profile");
+        }
         if (options.get("algorithm") != null) {
             request.algorithm(AlgorithmId.of(options.get("algorithm")));
         } else if (options.get("suite") != null) {
             request.suite(parseSuite(options.get("suite")));
-        }
-        if (options.get("profile") != null) {
+        } else if (options.get("profile") != null) {
             request.profile(parseProfile(options.get("profile")));
         }
         request.aad(aad(options.get("aad")))
