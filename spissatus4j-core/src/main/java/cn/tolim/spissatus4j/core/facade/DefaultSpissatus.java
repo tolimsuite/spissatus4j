@@ -81,9 +81,9 @@ public final class DefaultSpissatus implements Spissatus {
                     provider.priority(), algorithms,
                     context.providerHealth().getOrDefault(provider.providerId(), HealthStatus.UP)));
         }
-        boolean fipsAvailable = context.complianceMode()
-                == cn.tolim.spissatus4j.contract.compliance.ComplianceMode.FIPS
-                || Boolean.parseBoolean(context.settings().getOrDefault("spissatus.fips.enabled", "false"));
+        boolean fipsAvailable = Boolean.parseBoolean(
+                context.settings().getOrDefault("spissatus.fips.enabled", "false"))
+                || context.providers().stream().anyMatch(AlgorithmProvider::fipsCapable);
         boolean gmAvailable = supported.contains(AlgorithmId.SM2)
                 || supported.contains(AlgorithmId.SM3)
                 || supported.contains(AlgorithmId.SM4_GCM)

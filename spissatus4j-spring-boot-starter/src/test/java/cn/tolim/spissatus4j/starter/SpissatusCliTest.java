@@ -68,11 +68,13 @@ class SpissatusCliTest {
         Path envelope = directory.resolve("message.envelope");
         Path decrypted = directory.resolve("message.decrypted");
         out.reset();
-        String[] encrypt = concat(new String[]{"encrypt", "--key", "cli-aes", "--algorithm",
-                "AES-GCM", "--in", message.toString(), "--out", envelope.toString(),
+        String[] encrypt = concat(new String[]{"encrypt", "--key", "cli-aes",
+                "--in", message.toString(), "--out", envelope.toString(),
                 "--tenant", "system"}, store);
         assertThat(run(encrypt, out, err)).isZero();
         assertThat(Files.exists(envelope)).isTrue();
+        assertThat(out.toString(StandardCharsets.UTF_8))
+                .contains("algorithm=AES-GCM", "envelopeVersion=2");
 
         out.reset();
         String[] decrypt = concat(new String[]{"decrypt", "--in", envelope.toString(), "--out",
@@ -84,7 +86,8 @@ class SpissatusCliTest {
         String[] inspect = concat(new String[]{"inspect-envelope", "--in", envelope.toString()},
                 store);
         assertThat(run(inspect, out, err)).isZero();
-        assertThat(out.toString(StandardCharsets.UTF_8)).contains("algorithm=AES-GCM");
+        assertThat(out.toString(StandardCharsets.UTF_8))
+                .contains("algorithm=AES-GCM", "headerHash=present", "version=2");
 
         out.reset();
         String[] sign = concat(new String[]{"sign", "--key", "cli-sign", "--algorithm",

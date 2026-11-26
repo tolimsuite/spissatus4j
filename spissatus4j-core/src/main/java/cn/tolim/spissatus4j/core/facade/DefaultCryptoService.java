@@ -1256,7 +1256,7 @@ public final class DefaultCryptoService implements CryptoService {
         try {
             context.metricsRecorder().increment(MetricNames.STREAM_BYTES,
                     Map.of("operation", operation.name(),
-                            "algorithm", algorithm == null ? "none" : algorithm.id()), bytes);
+                            "algorithm", algorithmTag(algorithm)), bytes);
         } catch (RuntimeException ignored) {
         }
     }

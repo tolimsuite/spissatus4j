@@ -56,6 +56,21 @@ public final class SpissatusSettings {
         SpissatusProperties.Envelope envelope = properties.getEnvelope();
         settings.put("spissatus.envelope.max-bytes", Integer.toString(envelope.getMaxBytes()));
 
+        SpissatusProperties.Selection selection = properties.getSelection();
+        settings.put("spissatus.selection.profile", selection.getProfile());
+        settings.put("spissatus.selection.preferred-algorithms",
+                csv(selection.getPreferredAlgorithms()));
+        settings.put("spissatus.selection.allow-deprecated",
+                Boolean.toString(selection.isAllowDeprecated()));
+        settings.put("spissatus.selection.allow-experimental",
+                Boolean.toString(selection.isAllowExperimental()));
+        settings.put("spissatus.selection.allow-family-reuse",
+                Boolean.toString(selection.isAllowFamilyReuse()));
+        settings.put("spissatus.selection.allow-legacy-v1",
+                Boolean.toString(selection.isAllowLegacyV1()));
+        settings.put("spissatus.selection.max-candidates",
+                Integer.toString(selection.getMaxCandidates()));
+
         SpissatusProperties.Nonce nonce = properties.getNonce();
         settings.put("spissatus.nonce.max-entries", Integer.toString(nonce.getMaxEntries()));
         settings.put("spissatus.nonce.ttl-hours", Integer.toString(nonce.getTtlHours()));

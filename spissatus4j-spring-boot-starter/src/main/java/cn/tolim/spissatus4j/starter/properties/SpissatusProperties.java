@@ -23,6 +23,7 @@ public class SpissatusProperties {
     private final Keys keys = new Keys();
     private final Policy policy = new Policy();
     private final Envelope envelope = new Envelope();
+    private final Selection selection = new Selection();
     private final SelfCheck selfCheck = new SelfCheck();
     private final Nonce nonce = new Nonce();
 
@@ -64,6 +65,10 @@ public class SpissatusProperties {
 
     public Envelope getEnvelope() {
         return envelope;
+    }
+
+    public Selection getSelection() {
+        return selection;
     }
 
     public SelfCheck getSelfCheck() {
@@ -297,6 +302,72 @@ public class SpissatusProperties {
 
         public void setMaxBytes(int maxBytes) {
             this.maxBytes = maxBytes;
+        }
+    }
+
+    public static class Selection {
+        private String profile = "AUTO_AEAD";
+        private List<String> preferredAlgorithms = new ArrayList<>();
+        private boolean allowDeprecated;
+        private boolean allowExperimental;
+        private boolean allowFamilyReuse;
+        private boolean allowLegacyV1;
+        private int maxCandidates = 32;
+
+        public String getProfile() {
+            return profile;
+        }
+
+        public void setProfile(String profile) {
+            this.profile = profile;
+        }
+
+        public List<String> getPreferredAlgorithms() {
+            return preferredAlgorithms;
+        }
+
+        public void setPreferredAlgorithms(List<String> preferredAlgorithms) {
+            this.preferredAlgorithms = preferredAlgorithms;
+        }
+
+        public boolean isAllowDeprecated() {
+            return allowDeprecated;
+        }
+
+        public void setAllowDeprecated(boolean allowDeprecated) {
+            this.allowDeprecated = allowDeprecated;
+        }
+
+        public boolean isAllowExperimental() {
+            return allowExperimental;
+        }
+
+        public void setAllowExperimental(boolean allowExperimental) {
+            this.allowExperimental = allowExperimental;
+        }
+
+        public boolean isAllowFamilyReuse() {
+            return allowFamilyReuse;
+        }
+
+        public void setAllowFamilyReuse(boolean allowFamilyReuse) {
+            this.allowFamilyReuse = allowFamilyReuse;
+        }
+
+        public boolean isAllowLegacyV1() {
+            return allowLegacyV1;
+        }
+
+        public void setAllowLegacyV1(boolean allowLegacyV1) {
+            this.allowLegacyV1 = allowLegacyV1;
+        }
+
+        public int getMaxCandidates() {
+            return maxCandidates;
+        }
+
+        public void setMaxCandidates(int maxCandidates) {
+            this.maxCandidates = maxCandidates;
         }
     }
 
