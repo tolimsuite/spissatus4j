@@ -1,0 +1,28 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+    }
+}
+
+// Release version: change this value and merge to main; the Release workflow publishes it.
+gradle.ext.spissatusVersion = '0.1.0'
+
+rootProject.name = 'spissatus4j'
+
+include 'spissatus4j-contract'
+include 'spissatus4j-core'
+include 'spissatus4j-crypto'
+include 'spissatus4j-key'
+include 'spissatus4j-envelope'
+include 'spissatus4j-policy'
+include 'spissatus4j-bouncycastle'
+include 'spissatus4j-gm'
+include 'spissatus4j-spring-boot-starter'

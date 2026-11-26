@@ -1,0 +1,157 @@
+plugins {
+    id 'base'
+}
+
+allprojects {
+    group = 'cn.tolim.spissatus4j'
+    version = gradle.ext.spissatusVersion
+}
+
+subprojects {
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
+
+    java {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(libs.versions.java.get().toInteger())
+        }
+        withSourcesJar()
+        withJavadocJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        options.release = 25
+        options.encoding = 'UTF-8'
+        options.compilerArgs += [
+                '-Xlint:all',
+                '-Xlint:-processing',
+                '-Xlint:-serial',
+                '-Xlint:-this-escape',
+                '-parameters'
+        ]
+    }
+
+    dependencies {
+        testImplementation platform(libs.junit.bom)
+        testImplementation libs.junit.jupiter
+        testRuntimeOnly libs.junit.platform.launcher
+    }
+
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
+
+    tasks.withType(Test).configureEach {
+        useJUnitPlatform()
+        testLogging {
+            events 'failed', 'skipped'
+            exceptionFormat 'full'
+            showStandardStreams = false
+        }
+        maxParallelForks = Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))
+        systemProperty 'java.awt.headless', 'true'
+    }
+
+    def moduleName = [
+            'spissatus4j-contract'            : 'cn.tolim.spissatus4j.contract',
+            'spissatus4j-core'                : 'cn.tolim.spissatus4j.core',
+            'spissatus4j-crypto'              : 'cn.tolim.spissatus4j.crypto',
+            'spissatus4j-key'                 : 'cn.tolim.spissatus4j.key',
+            'spissatus4j-envelope'            : 'cn.tolim.spissatus4j.envelope',
+            'spissatus4j-policy'              : 'cn.tolim.spissatus4j.policy',
+            'spissatus4j-bouncycastle'        : 'cn.tolim.spissatus4j.bc',
+            'spissatus4j-gm'                  : 'cn.tolim.spissatus4j.gm',
+            'spissatus4j-spring-boot-starter' : 'cn.tolim.spissatus4j.starter'
+    ][name]
+
+    jar {
+        manifest {
+            attributes('Automatic-Module-Name': moduleName)
+        }
+    }
+
+    publishing {
+        repositories {
+            maven {
+                name = 'staging'
+                url = rootProject.layout.buildDirectory.dir('staging-repo')
+            }
+        }
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+                pom {
+                    name = project.name
+                    description = project.description ?: 'spissatus4j cryptographic engineering library'
+                    url = 'https://github.com/tolimsuite/spissatus4j'
+                    licenses {
+                        license {
+                            name = 'Apache License, Version 2.0'
+                            url = 'https://www.apache.org/licenses/LICENSE-2.0.txt'
+                            distribution = 'repo'
+                        }
+                    }
+                    developers {
+                        developer {
+                            id = 'tolim'
+                            name = 'TOLIM Technologies Pte. Ltd.'
+                            url = 'https://tolim.cn'
+                        }
+                    }
+                    organization {
+                        name = 'TOLIM Technologies Pte. Ltd.'
+                        url = 'https://tolim.cn'
+                    }
+                    scm {
+                        connection = 'scm:git:https://github.com/tolimsuite/spissatus4j.git'
+                        developerConnection = 'scm:git:ssh://git@github.com/tolimsuite/spissatus4j.git'
+                        url = 'https://github.com/tolimsuite/spissatus4j'
+                    }
+                }
+            }
+        }
+    }
+
+    def signingKey = findProperty('signingKey')
+    if (signingKey != null && !signingKey.toString().isBlank()) {
+        apply plugin: 'signing'
+        signing {
+            useInMemoryPgpKeys(signingKey.toString(),
+                    findProperty('signingPassword')?.toString())
+            sign publishing.publications.mavenJava
+        }
+    }
+
+    tasks.named('check') {
+        dependsOn rootProject.tasks.named('checkPackageNames')
+    }
+}
+
+def packageCheck = tasks.register('checkPackageNames') {
+    group = 'verification'
+    description = 'Verifies that every Java source file uses a cn.tolim.spissatus4j package.'
+
+    def sources = fileTree(projectDir) {
+        include 'spissatus4j-*/src/**/*.java'
+    }
+    inputs.files(sources)
+
+    doLast {
+        def violations = []
+        sources.each { file ->
+            def matcher = file.getText('UTF-8') =~ /(?m)^\s*package\s+([\w.]+)\s*;/
+            if (!matcher.find() || !matcher.group(1).startsWith('cn.tolim.spissatus4j.')) {
+                violations << projectDir.toPath().relativize(file.toPath()).toString()
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw new GradleException("Package naming violation (must start with cn.tolim.spissatus4j.):\n - " +
+                    violations.join('\n - '))
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn packageCheck
+}
