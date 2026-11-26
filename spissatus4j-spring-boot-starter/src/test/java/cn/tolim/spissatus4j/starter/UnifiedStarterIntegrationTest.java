@@ -54,6 +54,8 @@ class UnifiedStarterIntegrationTest {
             assertThat(result.envelope().version()).isEqualTo(2);
             assertThat(result.envelope().headerHash()).hasSize(32);
             assertThat(result.selection().selectedAlgorithm()).isEqualTo(AlgorithmId.AES_GCM);
+            assertThat(facade.decryptEnvelope(facade.envelopeService().encode(
+                    result.envelope(), EnvelopeFormat.JSON), caller())).isEqualTo(plaintext);
 
             for (EnvelopeFormat format : EnvelopeFormat.values()) {
                 byte[] encoded = facade.envelopeService().encode(result.envelope(), format);
@@ -88,6 +90,55 @@ class UnifiedStarterIntegrationTest {
             assertThat(result.selection().selectedAlgorithm()).isEqualTo(AlgorithmId.SM4_GCM);
             byte[] encoded = facade.envelopeService().encode(result.envelope(),
                     EnvelopeFormat.JSON);
+            assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
+                    .isEqualTo(plaintext);
+        });
+    }
+
+    @Test
+    void candidateKeysAndAlgorithmOrderAreDeterministic() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            KeyId aes = generate(facade, "candidate-aes", KeyType.AES, AlgorithmId.AES_GCM);
+            KeyId chacha = generate(facade, "candidate-chacha", KeyType.SYMMETRIC,
+                    AlgorithmId.CHACHA20_POLY1305);
+            byte[] plaintext = "candidate order".getBytes(StandardCharsets.UTF_8);
+            UnifiedEncryptionResult result = facade.encrypt(UnifiedEncryptRequest.builder(
+                            java.util.List.of(chacha, aes), plaintext, caller())
+                    .candidates(java.util.List.of(AlgorithmId.CHACHA20_POLY1305,
+                            AlgorithmId.AES_GCM))
+                    .build());
+            assertThat(result.selection().selectedAlgorithm())
+                    .isEqualTo(AlgorithmId.CHACHA20_POLY1305);
+            assertThat(result.selection().selectedKeyId()).isEqualTo(chacha);
+            byte[] encoded = facade.envelopeService().encode(result.envelope(),
+                    EnvelopeFormat.JSON);
+            assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
+                    .isEqualTo(plaintext);
+        });
+    }
+
+    @Test
+    void familyReuseMustBeExplicit() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            KeyId aes = generate(facade, "family-aes", KeyType.AES, AlgorithmId.AES_GCM);
+            byte[] plaintext = "family reuse".getBytes(StandardCharsets.UTF_8);
+            assertThatThrownBy(() -> facade.encrypt(UnifiedEncryptRequest.builder(
+                            aes, plaintext, caller())
+                    .algorithm(AlgorithmId.AES_CBC).build()))
+                    .isInstanceOfSatisfying(
+                            cn.tolim.spissatus4j.contract.exception.KeyException.class,
+                            failure -> assertThat(failure.errorCode())
+                                    .isEqualTo(ErrorCode.KEY_ALGORITHM_MISMATCH));
+            UnifiedEncryptionResult result = facade.encrypt(UnifiedEncryptRequest.builder(
+                            aes, plaintext, caller())
+                    .algorithm(AlgorithmId.AES_CBC)
+                    .allowFamilyReuse(true)
+                    .build());
+            assertThat(result.selection().selectedAlgorithm()).isEqualTo(AlgorithmId.AES_CBC);
+            byte[] encoded = facade.envelopeService().encode(result.envelope(),
+                    EnvelopeFormat.TLV);
             assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
                     .isEqualTo(plaintext);
         });

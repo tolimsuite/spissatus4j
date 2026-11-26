@@ -154,6 +154,41 @@ try (Spissatus facade = SpissatusBuilders.builder()
 默认密钥管理器使用内存 Provider，适合开发与测试。生产环境应配置 `file` 或 `keystore` 存储，
 或实现 KMS/Vault/HSM 的 `KeyProvider`。
 
+## 统一加密 / 解密入口
+
+`Spissatus.encrypt(UnifiedEncryptRequest)` 新增统一入口：从已安装、合规、已授权且与密钥兼容的
+能力中选择**唯一主算法**。它是**能力聚合**，不是用所有算法重复加密，解密时也绝不协商或降级。
+
+```java
+UnifiedEncryptionResult result = facade.encrypt(
+    UnifiedEncryptRequest.builder(KeyId.of("order-aes"), plaintext, caller)
+        .profile(SelectionProfile.AUTO_AEAD)
+        .aad(AAD.ofUtf8("order-context"))
+        .format(EnvelopeFormat.JSON)
+        .encoding(BinaryEncoding.BASE64)
+        .build());
+
+byte[] encoded = facade.envelopeService()
+    .encode(result.envelope(), result.envelope().format());
+byte[] decrypted = facade.decrypt(
+    UnifiedDecryptRequest.builder(encoded, caller).build());
+```
+
+- **选择**：显式算法、命名套件、有序候选列表或 profile。选择器过滤 `PROHIBITED`/`UNKNOWN`、
+  合规不允许、Provider 不可用、密钥不兼容的候选，并返回有界 `SelectionReport`；随后由 crypto
+  服务对选中密钥执行**恰好一次** `PolicyEngine.evaluate`。策略拒绝即终止，不回退。
+- **信封**：统一入口生成 **v2** 信封。`headerHash` 是版本、算法、keyId、创建时间、salt/KDF
+  与属性的 SHA-256 绑定；加密使用“域分隔的 headerHash + 调用方 AAD”作为有效 AAD。篡改路由或
+  元数据会在解密前失败。统一解密默认拒绝 v1 旧信封，除非 `allowLegacyV1(true)`；时间窗口检查只
+  接受 v2。
+- **Profile**：`AUTO_AEAD`（默认）、`AUTO_AEAD_THEN_ETM`（显式启用 EtM 块模式）、`FIPS_AEAD`、
+  `GM_AEAD`、`GM_HYBRID_AEAD`。自动档位绝不选择非对称算法、实验/弃用算法或更弱模式。
+- **密钥**：`keyId` 或显式的 `candidateKeyIds` 列表；本版本不做租户内自动密钥列举。仅 ACTIVE
+  密钥可加密；DEACTIVATED 密钥仅用于历史数据解密。
+- **能力视图**：`selectionCapabilities()` 列出 installed/compliant/available，不暴露 Provider 类型。
+- **配置**：`spissatus.selection.profile`、`preferred-algorithms`、`allow-deprecated`、
+  `allow-experimental`、`allow-family-reuse`、`allow-legacy-v1`、`max-candidates`。
+
 ## Spring Boot Starter（可选）
 
 ```yaml

@@ -2,6 +2,29 @@
 
 spissatus4j 的重要变更记录在此。
 
+## [Unreleased]
+
+### 新增
+
+- 统一 `Spissatus.encrypt(UnifiedEncryptRequest)` / `decrypt(UnifiedDecryptRequest)` 入口：
+  从已安装、合规、已授权且与密钥兼容的能力中确定性选择唯一主算法；支持有序候选、命名套件与
+  `AUTO_AEAD` / `AUTO_AEAD_THEN_ETM` / FIPS / GM profile。
+- 信封 v2：`headerHash` 以 SHA-256 绑定版本、算法、keyId、创建时间、salt/KDF 与属性；
+  有效 AAD 域分隔，解密时重建。
+- `PolicyEngine` 选择 hints（非权威、不产生限流副作用）；选择报告、能力视图、审计事件与有界指标。
+- Spring Boot `spissatus.selection.*` 配置；CLI 统一加密/解密、`--keys`、`--suite`、`--profile`
+  与 `--allow-legacy-v1`。
+- 默认密钥管理器支持 ChaCha20-Poly1305 密钥生成。
+
+### 安全
+
+- v2 信封元数据被篡改时在解密前发现；统一入口默认拒绝 v1 旧信封，除非显式允许。
+- 统一解密将 tag、padding 与密文失败统一泛化为认证失败。
+- 每次统一操作仅一次权威策略决策；策略拒绝不切换到其他算法或密钥。
+- FIPS/GM 路由按合规模式与 Provider 能力过滤；`Capabilities.fipsAvailable` 改为反映已安装的
+  FIPS-capable Provider。
+- 流式指标使用有界算法标签（未注册为 `unknown`）。
+
 ## [0.1.0] - 2026-11-26
 
 首次公开发布。

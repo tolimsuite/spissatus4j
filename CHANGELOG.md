@@ -2,6 +2,33 @@
 
 All notable changes to spissatus4j are documented here.
 
+## [Unreleased]
+
+### Added
+
+- Unified `Spissatus.encrypt(UnifiedEncryptRequest)` / `decrypt(UnifiedDecryptRequest)` entry point:
+  deterministic selection of one primary algorithm from installed, compliant, authorized and
+  key-compatible capabilities; ordered candidate lists, named suites and `AUTO_AEAD` /
+  `AUTO_AEAD_THEN_ETM` / FIPS / GM profiles.
+- Envelope version 2 with a SHA-256 `headerHash` binding version, algorithm, key id, creation time,
+  salt/KDF metadata and attributes; effective AAD is domain-separated and reconstructed on decrypt.
+- Selection hints on `PolicyEngine` (non-authoritative, no rate-limit side effects); selection
+  reports, capabilities view, audit events and bounded metrics.
+- Spring Boot `spissatus.selection.*` properties and CLI unified encrypt/decrypt, `--keys`,
+  `--suite`, `--profile` and `--allow-legacy-v1`.
+- ChaCha20-Poly1305 key generation in the default key manager.
+
+### Security
+
+- V2 envelope metadata tampering is detected before decryption; v1 envelopes are rejected by the
+  unified entry unless explicitly allowed.
+- Unified decryption maps tag, padding and ciphertext failures to a generic authentication error.
+- One authoritative policy decision per unified operation; policy denials never fall back to another
+  algorithm or key.
+- FIPS/GM routing filters by compliance and provider capability; `Capabilities.fipsAvailable` now
+  reflects installed FIPS-capable providers.
+- Stream metrics use bounded algorithm tags (`unknown` for unregistered ids).
+
 ## [0.1.0] - 2026-11-26
 
 Initial public release.
