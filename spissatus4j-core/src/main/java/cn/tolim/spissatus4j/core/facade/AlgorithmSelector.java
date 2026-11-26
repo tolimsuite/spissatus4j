@@ -60,6 +60,14 @@ final class AlgorithmSelector {
 
     SelectionOutcome select(UnifiedEncryptRequest request) {
         Objects.requireNonNull(request, "request");
+        if (request.candidateKeyIds().size() > settings.maxCandidates()) {
+            throw new cn.tolim.spissatus4j.contract.exception.ConfigurationException(
+                    ErrorCode.INVALID_PARAMETER, "Too many candidate keys");
+        }
+        if (request.candidates().size() > settings.maxCandidates()) {
+            throw new cn.tolim.spissatus4j.contract.exception.ConfigurationException(
+                    ErrorCode.INVALID_PARAMETER, "Too many candidate algorithms");
+        }
         SelectionProfile profile = settings.profileFor(request);
         boolean explicit = request.algorithm() != null || request.suite() != null;
         boolean elevated = explicit || !request.candidates().isEmpty();
@@ -266,6 +274,13 @@ final class AlgorithmSelector {
         }
         if (key.expired(context.clock().instant())) {
             return SelectionRejection.KEY_EXPIRED;
+        }
+        if (!key.algorithm().isKnown()
+                || key.algorithm().info().status() == SecurityStatus.PROHIBITED
+                || key.algorithm().info().status() == SecurityStatus.UNKNOWN) {
+            // Do not let a key created for a prohibited algorithm be laundered
+            // into an allowed mode through family reuse.
+            return SelectionRejection.KEY_ALGORITHM_MISMATCH;
         }
         if (!algorithmMatches(key, algorithm, request)) {
             return SelectionRejection.KEY_ALGORITHM_MISMATCH;

@@ -49,10 +49,19 @@ public interface Spissatus extends AutoCloseable {
 
     RuntimeState state();
 
-    /** Encrypts and wraps the result in a self-describing envelope. */
+    /**
+     * Encrypts and wraps the result in a self-describing envelope.
+     *
+     * <p>This legacy path produces a v1 envelope whose metadata is not bound
+     * to the ciphertext. Prefer {@link #encrypt(UnifiedEncryptRequest)} for
+     * new data.</p>
+     */
     Envelope encryptToEnvelope(EncryptRequest request, EnvelopeFormat format, BinaryEncoding encoding);
 
-    /** Decodes an envelope, validates it, decrypts it and audits the operation. */
+    /**
+     * Decodes an envelope, validates it, decrypts it and audits the operation.
+     * V2 envelopes have their metadata binding verified before decryption.
+     */
     byte[] decryptEnvelope(byte[] encodedEnvelope, CallerContext caller);
 
     /**

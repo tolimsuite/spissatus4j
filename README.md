@@ -156,6 +156,48 @@ try (Spissatus facade = SpissatusBuilders.builder()
 The default key manager uses an in-memory provider for development. Production deployments should configure
 `file` or `keystore` storage, or implement a `KeyProvider` for KMS/Vault/HSM.
 
+## Unified encrypt / decrypt
+
+`Spissatus.encrypt(UnifiedEncryptRequest)` adds a single entry point that selects **one** primary
+algorithm from the installed, compliant, authorized and key-compatible capabilities. It is
+**capability aggregation**, not repeated encryption with every algorithm, and it never negotiates or
+downgrades on decrypt.
+
+```java
+UnifiedEncryptionResult result = facade.encrypt(
+    UnifiedEncryptRequest.builder(KeyId.of("order-aes"), plaintext, caller)
+        .profile(SelectionProfile.AUTO_AEAD)
+        .aad(AAD.ofUtf8("order-context"))
+        .format(EnvelopeFormat.JSON)
+        .encoding(BinaryEncoding.BASE64)
+        .build());
+
+byte[] encoded = facade.envelopeService()
+    .encode(result.envelope(), result.envelope().format());
+byte[] decrypted = facade.decrypt(
+    UnifiedDecryptRequest.builder(encoded, caller).build());
+```
+
+- **Selection**: explicit algorithm, named suite, ordered candidate list, or a profile. The selector
+  filters `PROHIBITED`/`UNKNOWN`/compliance-disallowed/provider-unavailable/key-incompatible
+  candidates and records a bounded `SelectionReport`; the crypto service then performs exactly one
+  `PolicyEngine.evaluate` for the selected key. A policy denial is final: there is no fallback.
+- **Envelopes**: unified encryption produces a **v2** envelope. `headerHash` is a SHA-256 binding of
+  the version, algorithm, key id, creation time, salt/KDF metadata and attributes; the cipher uses a
+  domain-separated effective AAD built from that hash and the caller AAD. Tampering with routing or
+  metadata fails before decryption. Unified decrypt rejects legacy v1 envelopes unless
+  `allowLegacyV1(true)` is set; freshness checks require v2.
+- **Profiles**: `AUTO_AEAD` (default), `AUTO_AEAD_THEN_ETM` (explicit opt-in for EtM-wrapped block
+  modes), `FIPS_AEAD`, `GM_AEAD`, `GM_HYBRID_AEAD`. Automatic profiles never select asymmetric
+  algorithms, experimental/deprecated algorithms, or weaker modes.
+- **Keys**: `keyId` or an explicit `candidateKeyIds` list. Automatic tenant-wide key listing is not
+  performed in this version. Only ACTIVE keys protect new data; DEACTIVATED keys remain usable for
+  historical decryption.
+- **Capabilities**: `facade.selectionCapabilities()` reports installed/compliant/available
+  algorithms without exposing provider types.
+- **Settings**: `spissatus.selection.profile`, `preferred-algorithms`, `allow-deprecated`,
+  `allow-experimental`, `allow-family-reuse`, `allow-legacy-v1`, `max-candidates`.
+
 ## Spring Boot starter (optional)
 
 ```yaml
