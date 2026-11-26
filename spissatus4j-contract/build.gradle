@@ -1,0 +1,5 @@
+description = 'spissatus4j stable contracts: facade, values, SPI and exceptions'
+
+dependencies {
+    // The contract module is deliberately dependency-free (JDK only).
+}
