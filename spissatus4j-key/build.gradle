@@ -1,0 +1,7 @@
+description = 'spissatus4j key lifecycle, providers, rotation, wrapping and destruction'
+
+dependencies {
+    api project(':spissatus4j-contract')
+    implementation project(':spissatus4j-core')
+    implementation libs.jackson.databind
+}
