@@ -8,7 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
-import cn.tolim.spissatus4j.contract.api.Spissatus;
+import cn.tolim.spissatus4j.contract.facade.Spissatus;
 import cn.tolim.spissatus4j.contract.audit.AuditEventType;
 import cn.tolim.spissatus4j.contract.crypto.AAD;
 import cn.tolim.spissatus4j.contract.crypto.EncryptRequest;

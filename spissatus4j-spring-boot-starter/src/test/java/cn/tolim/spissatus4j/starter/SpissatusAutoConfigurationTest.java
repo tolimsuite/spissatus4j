@@ -9,7 +9,7 @@ import cn.tolim.spissatus4j.contract.crypto.MacRequest;
 import cn.tolim.spissatus4j.contract.crypto.MacVerifyRequest;
 import cn.tolim.spissatus4j.contract.crypto.SignRequest;
 import cn.tolim.spissatus4j.contract.crypto.VerifyRequest;
-import cn.tolim.spissatus4j.contract.api.Spissatus;
+import cn.tolim.spissatus4j.contract.facade.Spissatus;
 import cn.tolim.spissatus4j.contract.audit.AuditEventType;
 import cn.tolim.spissatus4j.contract.crypto.DecryptRequest;
 import cn.tolim.spissatus4j.contract.crypto.EncryptRequest;

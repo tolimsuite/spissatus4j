@@ -5,7 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
-import cn.tolim.spissatus4j.contract.api.Capabilities;
+import cn.tolim.spissatus4j.contract.facade.Capabilities;
 import cn.tolim.spissatus4j.contract.compliance.ComplianceMode;
 import cn.tolim.spissatus4j.contract.runtime.HealthStatus;
 import cn.tolim.spissatus4j.contract.unified.AlgorithmCandidate;

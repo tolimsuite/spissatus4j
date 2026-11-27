@@ -1,7 +1,7 @@
 package cn.tolim.spissatus4j.core.builder;
 
-import cn.tolim.spissatus4j.contract.api.Spissatus;
-import cn.tolim.spissatus4j.contract.api.SpissatusBuilder;
+import cn.tolim.spissatus4j.contract.facade.Spissatus;
+import cn.tolim.spissatus4j.contract.facade.SpissatusBuilder;
 import cn.tolim.spissatus4j.contract.audit.AlertSink;
 import cn.tolim.spissatus4j.contract.audit.AuditEvent;
 import cn.tolim.spissatus4j.contract.audit.AuditEventType;

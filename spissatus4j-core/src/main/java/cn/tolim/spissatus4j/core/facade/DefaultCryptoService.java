@@ -5,7 +5,7 @@ import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmInfo;
 import cn.tolim.spissatus4j.contract.algorithm.KeyUsage;
 import cn.tolim.spissatus4j.contract.algorithm.Operation;
-import cn.tolim.spissatus4j.contract.api.CryptoService;
+import cn.tolim.spissatus4j.contract.facade.CryptoService;
 import cn.tolim.spissatus4j.contract.audit.Alert;
 import cn.tolim.spissatus4j.contract.audit.AlertSeverity;
 import cn.tolim.spissatus4j.contract.audit.AlertSink;

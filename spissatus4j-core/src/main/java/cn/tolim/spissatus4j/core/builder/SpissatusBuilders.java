@@ -1,6 +1,6 @@
 package cn.tolim.spissatus4j.core.builder;
 
-import cn.tolim.spissatus4j.contract.api.SpissatusBuilder;
+import cn.tolim.spissatus4j.contract.facade.SpissatusBuilder;
 
 /** Entry point for the default facade builder. */
 public final class SpissatusBuilders {

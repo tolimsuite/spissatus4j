@@ -1,9 +1,9 @@
 package cn.tolim.spissatus4j.core.facade;
 
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
-import cn.tolim.spissatus4j.contract.api.Capabilities;
-import cn.tolim.spissatus4j.contract.api.CryptoService;
-import cn.tolim.spissatus4j.contract.api.Spissatus;
+import cn.tolim.spissatus4j.contract.facade.Capabilities;
+import cn.tolim.spissatus4j.contract.facade.CryptoService;
+import cn.tolim.spissatus4j.contract.facade.Spissatus;
 import cn.tolim.spissatus4j.contract.audit.AuditEvent;
 import cn.tolim.spissatus4j.contract.audit.AuditEventType;
 import cn.tolim.spissatus4j.contract.audit.AuditOutcome;
