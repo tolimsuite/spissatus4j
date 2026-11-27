@@ -77,6 +77,14 @@ subprojects {
                 name = 'staging'
                 url = rootProject.layout.buildDirectory.dir('staging-repo')
             }
+            maven {
+                name = 'github'
+                url = uri('https://maven.pkg.github.com/tolimsuite/spissatus4j')
+                credentials {
+                    username = findProperty('gpr.user') ?: System.getenv('GITHUB_ACTOR')
+                    password = findProperty('gpr.key') ?: System.getenv('GITHUB_TOKEN')
+                }
+            }
         }
         publications {
             mavenJava(MavenPublication) {
