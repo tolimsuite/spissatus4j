@@ -304,9 +304,18 @@ class EnvelopeServiceTest {
         Envelope asymmetric = v2AesGcmEnvelopeBuilder().algorithm(AlgorithmId.RSA_OAEP)
                 .nonce(Nonce.empty())
                 .tag(new byte[0])
+                .aad(AAD.empty())
+                .build();
+        assertDoesNotThrow(() -> service.validate(asymmetric),
+                "version 2 supports asymmetric envelopes with an in-ciphertext binding");
+
+        Envelope asymmetricWithAad = v2AesGcmEnvelopeBuilder().algorithm(AlgorithmId.RSA_OAEP)
+                .nonce(Nonce.empty())
+                .tag(new byte[0])
+                .aad(AAD.ofUtf8("unsupported"))
                 .build();
         assertErrorCode(ErrorCode.ENVELOPE_VALIDATION_FAILED,
-                () -> service.validate(asymmetric));
+                () -> service.validate(asymmetricWithAad));
 
         Envelope legacyHash = aesGcmEnvelopeBuilder().algorithm(AlgorithmId.SHA_256)
                 .nonce(Nonce.empty())

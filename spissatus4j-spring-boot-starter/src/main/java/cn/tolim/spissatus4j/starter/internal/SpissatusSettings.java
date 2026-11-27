@@ -69,6 +69,10 @@ public final class SpissatusSettings {
                 Boolean.toString(selection.isAllowFamilyReuse()));
         settings.put("spissatus.selection.allow-legacy-v1",
                 Boolean.toString(selection.isAllowLegacyV1()));
+        settings.put("spissatus.selection.allow-auto-key-selection",
+                Boolean.toString(selection.isAllowAutoKeySelection()));
+        settings.put("spissatus.selection.allow-deactivated-encryption",
+                Boolean.toString(selection.isAllowDeactivatedEncryption()));
         settings.put("spissatus.selection.max-candidates",
                 Integer.toString(selection.getMaxCandidates()));
 

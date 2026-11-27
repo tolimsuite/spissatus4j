@@ -11,8 +11,10 @@ import cn.tolim.spissatus4j.contract.exception.PolicyException;
 import cn.tolim.spissatus4j.contract.exception.SpissatusException;
 import cn.tolim.spissatus4j.contract.key.KeyDescriptor;
 import cn.tolim.spissatus4j.contract.key.KeyId;
+import cn.tolim.spissatus4j.contract.key.KeySelectionCandidate;
 import cn.tolim.spissatus4j.contract.key.KeyState;
 import cn.tolim.spissatus4j.contract.key.KeyType;
+import cn.tolim.spissatus4j.contract.key.KeyUseOptions;
 import cn.tolim.spissatus4j.contract.policy.CallerContext;
 import cn.tolim.spissatus4j.contract.policy.SelectionHints;
 import cn.tolim.spissatus4j.contract.unified.AlgorithmSuite;
@@ -43,7 +45,7 @@ final class AlgorithmSelector {
     record SelectionOutcome(Selection selection, SelectionReport report) {
     }
 
-    private record KeyCandidate(KeyId keyId, KeyDescriptor descriptor, Long requestedVersion,
+    private record KeyCandidate(KeyId keyId, KeySelectionCandidate key, Long requestedVersion,
                                 SelectionRejection rejection) {
     }
 
@@ -60,6 +62,10 @@ final class AlgorithmSelector {
 
     SelectionOutcome select(UnifiedEncryptRequest request) {
         Objects.requireNonNull(request, "request");
+        if (request.autoKeySelection() && !settings.allowAutoKeySelection()) {
+            throw new PolicyException(ErrorCode.POLICY_DENIED,
+                    "Automatic key selection is not enabled");
+        }
         if (request.candidateKeyIds().size() > settings.maxCandidates()) {
             throw new cn.tolim.spissatus4j.contract.exception.ConfigurationException(
                     ErrorCode.INVALID_PARAMETER, "Too many candidate keys");
@@ -93,7 +99,7 @@ final class AlgorithmSelector {
                     continue;
                 }
                 SelectionRejection keyRejection = keyRejection(
-                        key.descriptor(), algorithm, info, request, hints);
+                        key.key(), algorithm, info, request, hints);
                 if (keyRejection != null) {
                     add(decisions, key.keyId(), algorithm, false, keyRejection);
                     continue;
@@ -138,16 +144,23 @@ final class AlgorithmSelector {
 
     private List<KeyCandidate> keys(UnifiedEncryptRequest request) {
         CallerContext caller = request.caller();
+        KeyUseOptions useOptions = KeyUseOptions.forEncryption(
+                settings.allowDeactivatedEncryption(request));
+        if (request.autoKeySelection()) {
+            return autoKeys(caller);
+        }
         if (request.keyId() != null) {
-            KeyDescriptor descriptor = peek(request.keyId(), request.keyVersion(), caller);
-            return List.of(new KeyCandidate(request.keyId(), descriptor,
-                    request.keyVersion(), null));
+            KeyDescriptor descriptor = peek(request.keyId(), request.keyVersion(), caller,
+                    useOptions);
+            return List.of(new KeyCandidate(request.keyId(),
+                    KeySelectionCandidate.from(descriptor), request.keyVersion(), null));
         }
         List<KeyCandidate> candidates = new ArrayList<>();
         for (KeyId keyId : request.candidateKeyIds()) {
             try {
-                KeyDescriptor descriptor = peek(keyId, request.keyVersion(), caller);
-                candidates.add(new KeyCandidate(keyId, descriptor, request.keyVersion(), null));
+                KeyDescriptor descriptor = peek(keyId, request.keyVersion(), caller, useOptions);
+                candidates.add(new KeyCandidate(keyId, KeySelectionCandidate.from(descriptor),
+                        request.keyVersion(), null));
             } catch (PolicyException e) {
                 throw e;
             } catch (KeyException e) {
@@ -164,9 +177,49 @@ final class AlgorithmSelector {
         return candidates;
     }
 
-    private KeyDescriptor peek(KeyId keyId, Long keyVersion, CallerContext caller) {
+    /**
+     * Advisory, non-policy key enumeration for the caller's own tenant. The
+     * final authoritative policy decision still runs on the selected key.
+     */
+    private List<KeyCandidate> autoKeys(CallerContext caller) {
+        List<KeySelectionCandidate> discovered;
         try {
-            return context.keyManager().peekForUse(keyId, keyVersion, KeyUsage.ENCRYPT, caller);
+            discovered = context.keyManager().candidateKeys(KeyUsage.ENCRYPT, caller,
+                    settings.maxCandidates());
+        } catch (PolicyException e) {
+            throw e;
+        } catch (SpissatusException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw new KeyException(ErrorCode.KEY_PROVIDER_FAILURE,
+                    "Key enumeration failed", e);
+        }
+        List<KeyCandidate> candidates = new ArrayList<>();
+        if (discovered == null) {
+            return candidates;
+        }
+        java.util.LinkedHashMap<KeyId, KeySelectionCandidate> unique =
+                new java.util.LinkedHashMap<>();
+        for (KeySelectionCandidate candidate : discovered) {
+            if (candidate == null || !caller.tenantId().equals(candidate.tenantId())) {
+                continue;
+            }
+            unique.putIfAbsent(candidate.keyId(), candidate);
+            if (unique.size() >= settings.maxCandidates()) {
+                break;
+            }
+        }
+        for (KeySelectionCandidate candidate : unique.values()) {
+            candidates.add(new KeyCandidate(candidate.keyId(), candidate, null, null));
+        }
+        return candidates;
+    }
+
+    private KeyDescriptor peek(KeyId keyId, Long keyVersion, CallerContext caller,
+                               KeyUseOptions useOptions) {
+        try {
+            return context.keyManager().peekForUse(keyId, keyVersion, KeyUsage.ENCRYPT,
+                    caller, useOptions);
         } catch (SpissatusException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -235,9 +288,10 @@ final class AlgorithmSelector {
     private static boolean familyAllowed(AlgorithmInfo info, SelectionProfile profile) {
         AlgorithmFamily family = info.family();
         if (profile == null) {
-            // V2 binds metadata through AEAD/EtM AAD only. Asymmetric
-            // algorithms remain available through the legacy v1 path.
-            if (family == AlgorithmFamily.AEAD) {
+            // Explicit selection may use AEAD, EtM-capable block modes or an
+            // asymmetric cipher. Asymmetric v2 envelopes bind metadata by
+            // prefixing the ciphertext plaintext instead of AAD.
+            if (family == AlgorithmFamily.AEAD || family == AlgorithmFamily.ASYMMETRIC) {
                 return true;
             }
             return family == AlgorithmFamily.SYMMETRIC && viableEtm(info);
@@ -259,11 +313,13 @@ final class AlgorithmSelector {
                 && !id.equals(AlgorithmId.SM4);
     }
 
-    private SelectionRejection keyRejection(KeyDescriptor key, AlgorithmId algorithm,
+    private SelectionRejection keyRejection(KeySelectionCandidate key, AlgorithmId algorithm,
                                             AlgorithmInfo info, UnifiedEncryptRequest request,
                                             SelectionHints hints) {
         Objects.requireNonNull(key, "key");
-        if (key.state() != KeyState.ACTIVE) {
+        boolean deactivatedAllowed = settings.allowDeactivatedEncryption(request);
+        if (key.state() != KeyState.ACTIVE
+                && !(deactivatedAllowed && key.state() == KeyState.DEACTIVATED)) {
             return SelectionRejection.KEY_NOT_ACTIVE;
         }
         if (!key.supportsUsage(KeyUsage.ENCRYPT)) {
@@ -304,7 +360,7 @@ final class AlgorithmSelector {
         return null;
     }
 
-    private boolean algorithmMatches(KeyDescriptor key, AlgorithmId algorithm,
+    private boolean algorithmMatches(KeySelectionCandidate key, AlgorithmId algorithm,
                                      UnifiedEncryptRequest request) {
         if (key.algorithm().equals(algorithm)) {
             return true;

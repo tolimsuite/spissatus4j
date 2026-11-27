@@ -1,5 +1,6 @@
 package cn.tolim.spissatus4j.core.facade;
 
+import cn.tolim.spissatus4j.contract.algorithm.AlgorithmFamily;
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
 import cn.tolim.spissatus4j.contract.algorithm.Operation;
 import cn.tolim.spissatus4j.contract.audit.AuditEvent;
@@ -84,32 +85,41 @@ final class DefaultUnifiedCryptoService {
         }
 
         Instant createdAt = context.clock().instant();
-        byte[] headerHash = EnvelopeBinding.headerHash(2, selection.algorithm(),
-                selection.keyId(), createdAt, Salt.empty(), null, request.attributes());
-        AAD effectiveAad;
-        try {
-            effectiveAad = EnvelopeBinding.effectiveAad(request.aad(), headerHash);
-        } catch (IllegalArgumentException e) {
-            throw new CryptoException(ErrorCode.INVALID_PARAMETER,
-                    "AAD is too large for a bound envelope");
-        }
+        boolean asymmetric = selection.algorithm().family() == AlgorithmFamily.ASYMMETRIC;
+        boolean allowDeactivated = settings.allowDeactivatedEncryption(request);
 
         EncryptRequest.Builder encryptBuilder = EncryptRequest.builder(selection.algorithm(),
                         selection.keyId(), request.plaintext(), request.caller())
-                .aad(effectiveAad)
-                .attributes(request.attributes());
+                .aad(request.aad())
+                .attributes(request.attributes())
+                .allowDeactivatedKey(allowDeactivated);
         if (selection.requestedKeyVersion() != null) {
             encryptBuilder.keyVersion(selection.requestedKeyVersion());
         }
 
+        EncryptRequest encryptRequest = encryptBuilder.build();
+        byte[][] headerHashHolder = new byte[1][];
         EncryptedData data;
         Envelope envelope;
         boolean encryptionCompleted = false;
         try {
-            data = crypto.encrypt(encryptBuilder.build(), createdAt);
+            data = crypto.encryptBound(encryptRequest, createdAt, version -> {
+                byte[] headerHash = EnvelopeBinding.headerHash(2, selection.algorithm(),
+                        selection.keyId(), version, createdAt, Salt.empty(), null,
+                        request.attributes());
+                headerHashHolder[0] = headerHash;
+                if (asymmetric) {
+                    return new DefaultCryptoService.BoundPayload(
+                            EnvelopeBinding.asymmetricPlaintext(request.plaintext(),
+                                    headerHash), AAD.empty(), headerHash);
+                }
+                return new DefaultCryptoService.BoundPayload(request.plaintext(),
+                        EnvelopeBinding.effectiveAad(request.aad(), headerHash), headerHash);
+            });
             encryptionCompleted = true;
             try {
-                envelope = envelopeService.createBound(data, headerHash, request.attributes());
+                envelope = envelopeService.createBound(data, headerHashHolder[0],
+                        request.attributes());
             } catch (EnvelopeException e) {
                 if (e.errorCode() == ErrorCode.UNSUPPORTED_OPERATION) {
                     throw new ConfigurationException(ErrorCode.MISSING_DEPENDENCY,
@@ -119,7 +129,9 @@ final class DefaultUnifiedCryptoService {
             }
             // EncryptedData carries the effective AAD used by the cipher. A v2
             // envelope stores the user AAD; decryptors reconstruct the effective
-            // value from it and the authenticated header hash.
+            // value from it and the authenticated header hash. Asymmetric
+            // envelopes store an empty AAD and carry the binding in the
+            // ciphertext prefix instead.
             envelope = envelope.toBuilder().aad(request.aad()).build();
             envelope = envelope.withEncoding(request.format(), request.encoding());
             envelopeService.validate(envelope);
@@ -204,11 +216,22 @@ final class DefaultUnifiedCryptoService {
                 .tag(envelope.tag())
                 .aad(aad)
                 .build();
+        byte[] plaintext;
         try {
-            return crypto.decrypt(decryptRequest);
+            plaintext = crypto.decrypt(decryptRequest);
         } catch (CryptoException e) {
             throw secureDecryptFailure(e);
         }
+        if (EnvelopeMetadataVerifier.isBound(envelope)
+                && envelope.algorithm().family() == AlgorithmFamily.ASYMMETRIC) {
+            try {
+                plaintext = EnvelopeMetadataVerifier.verifyAsymmetricPlaintext(envelope, plaintext);
+            } catch (EnvelopeException e) {
+                auditBindingFailure(request.caller(), envelope, e);
+                throw e;
+            }
+        }
+        return plaintext;
     }
 
     private Envelope decode(UnifiedDecryptRequest request, EnvelopeService envelopeService) {

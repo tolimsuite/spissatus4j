@@ -3,9 +3,11 @@ package cn.tolim.spissatus4j.contract.key;
 /**
  * Key lifecycle state.
  *
- * <p>Only {@link #ACTIVE} keys may encrypt, sign, wrap or MAC.
- * {@link #DEACTIVATED} keys may only decrypt, verify or unwrap historical
- * data. All other states are terminal for cryptographic use.</p>
+ * <p>Only {@link #ACTIVE} keys may normally encrypt, sign, wrap or MAC.
+ * {@link #DEACTIVATED} keys may only process historical data (decrypt, verify,
+ * unwrap) unless an operator setting and an explicit encryption request both
+ * opt in through {@link KeyUseOptions} and the policy engine still allows it.
+ * All other states are terminal for cryptographic use.</p>
  */
 public enum KeyState {
     PRE_ACTIVATION,

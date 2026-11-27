@@ -307,11 +307,19 @@ public final class DefaultEnvelopeService implements EnvelopeService {
         AlgorithmInfo info = algorithm.info();
         if (version >= 2) {
             AlgorithmFamily family = info.family();
-            // Asymmetric ciphers take no AAD, so a v2 header hash would not be
-            // authenticated. v2 is reserved for symmetric AEAD/EtM envelopes.
-            if (family != AlgorithmFamily.AEAD && family != AlgorithmFamily.SYMMETRIC) {
+            // AEAD/EtM authenticate the header hash as AAD. Asymmetric ciphers
+            // take no AAD, so v2 carries the header hash inside the ciphertext
+            // plaintext instead; the unified entry verifies it after decryption.
+            if (family != AlgorithmFamily.AEAD && family != AlgorithmFamily.SYMMETRIC
+                    && family != AlgorithmFamily.ASYMMETRIC) {
                 throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
-                        "Version 2 envelopes require a symmetric AEAD/EtM algorithm");
+                        "Version 2 envelopes require a symmetric AEAD/EtM or asymmetric algorithm");
+            }
+            if (family == AlgorithmFamily.ASYMMETRIC
+                    && (envelope.nonce().length() > 0 || envelope.tag().length != 0
+                        || !envelope.aad().isEmpty())) {
+                throw new EnvelopeException(ErrorCode.ENVELOPE_VALIDATION_FAILED,
+                        "Asymmetric version 2 envelopes must not carry a nonce, tag or AAD");
             }
         }
         if (info.nonceBytes() > 0 && envelope.nonce().length() != info.nonceBytes()) {

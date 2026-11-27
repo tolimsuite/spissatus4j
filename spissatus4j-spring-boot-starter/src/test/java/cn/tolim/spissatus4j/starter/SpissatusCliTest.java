@@ -82,6 +82,21 @@ class SpissatusCliTest {
         assertThat(run(decrypt, out, err)).isZero();
         assertThat(Files.readString(decrypted)).isEqualTo("cli signature message");
 
+        Path autoEnvelope = directory.resolve("message.auto.envelope");
+        Path autoDecrypted = directory.resolve("message.auto.decrypted");
+        out.reset();
+        String[] autoEncrypt = concat(new String[]{"encrypt", "--auto-key",
+                "--in", message.toString(), "--out", autoEnvelope.toString(),
+                "--tenant", "system"}, store);
+        assertThat(run(autoEncrypt, out, err)).isZero();
+        assertThat(out.toString(StandardCharsets.UTF_8))
+                .contains("algorithm=AES-GCM", "envelopeVersion=2");
+        out.reset();
+        String[] autoDecrypt = concat(new String[]{"decrypt", "--in", autoEnvelope.toString(),
+                "--out", autoDecrypted.toString(), "--tenant", "system"}, store);
+        assertThat(run(autoDecrypt, out, err)).isZero();
+        assertThat(Files.readString(autoDecrypted)).isEqualTo("cli signature message");
+
         out.reset();
         String[] inspect = concat(new String[]{"inspect-envelope", "--in", envelope.toString()},
                 store);

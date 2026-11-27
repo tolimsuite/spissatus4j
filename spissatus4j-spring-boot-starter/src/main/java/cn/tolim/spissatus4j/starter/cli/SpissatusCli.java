@@ -129,9 +129,11 @@ public final class SpissatusCli {
 
                 generate-key: --id <keyId> --algorithm <id> [--type <AES|SM4|RSA|EC|ED25519|ED448|SM2|HMAC|SYMMETRIC>]
                               [--bits <n>]
-                encrypt:      (--key <keyId> | --keys <id,id>) --in <file> [--out <file>] [--aad <text>]
+                encrypt:      (--key <keyId> | --keys <id,id> | --auto-key) --in <file> [--out <file>]
+                              [--aad <text>]
                               [--algorithm <id> | --suite <id> | --profile <profile>]
                               [--allow-deprecated] [--allow-experimental] [--allow-family-reuse]
+                              [--allow-deactivated-key]
                               [--format JSON|TLV] [--encoding BASE64|BASE64URL|HEX|RAW]
                 decrypt:      --in <file> [--out <file>] [--allow-legacy-v1]
                 sign:         --key <keyId> --algorithm <id> --in <file> [--out <file>]
@@ -224,15 +226,28 @@ public final class SpissatusCli {
         BinaryEncoding encoding = parseEncoding(options.get("encoding", "BASE64"));
         String singleKey = options.get("key");
         String keyList = options.get("keys");
-        if ((singleKey == null) == (keyList == null)) {
+        boolean autoKey = options.flag("auto-key");
+        int keySources = (singleKey == null ? 0 : 1) + (keyList == null ? 0 : 1)
+                + (autoKey ? 1 : 0);
+        if (keySources != 1) {
             throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
-                    "Exactly one of --key or --keys is required");
+                    "Exactly one of --key, --keys or --auto-key is required");
         }
-        UnifiedEncryptRequest.Builder request = singleKey != null
-                ? UnifiedEncryptRequest.builder(KeyId.of(singleKey), plaintext, caller(tenant))
-                : UnifiedEncryptRequest.builder(parseKeyIds(keyList), plaintext, caller(tenant));
+        UnifiedEncryptRequest.Builder request;
+        if (singleKey != null) {
+            request = UnifiedEncryptRequest.builder(KeyId.of(singleKey), plaintext, caller(tenant));
+        } else if (keyList != null) {
+            request = UnifiedEncryptRequest.builder(parseKeyIds(keyList), plaintext,
+                    caller(tenant));
+        } else {
+            request = UnifiedEncryptRequest.builderAutoKey(plaintext, caller(tenant));
+        }
         String keyVersion = options.get("key-version");
         if (keyVersion != null) {
+            if (autoKey) {
+                throw new ConfigurationException(ErrorCode.INVALID_PARAMETER,
+                        "--key-version cannot be combined with --auto-key");
+            }
             request.keyVersion(Long.parseLong(keyVersion));
         }
         int explicitIntents = (options.get("algorithm") == null ? 0 : 1)
@@ -254,7 +269,8 @@ public final class SpissatusCli {
                 .encoding(encoding)
                 .allowDeprecated(options.flag("allow-deprecated"))
                 .allowExperimental(options.flag("allow-experimental"))
-                .allowFamilyReuse(options.flag("allow-family-reuse"));
+                .allowFamilyReuse(options.flag("allow-family-reuse"))
+                .allowDeactivatedKey(options.flag("allow-deactivated-key"));
         try (Spissatus facade = build(options)) {
             UnifiedEncryptionResult result = facade.encrypt(request.build());
             Envelope envelope = result.envelope();
@@ -441,6 +457,12 @@ public final class SpissatusCli {
         }
         if (options.flag("allow-legacy-v1")) {
             builder.setting("spissatus.selection.allow-legacy-v1", "true");
+        }
+        if (options.flag("auto-key")) {
+            builder.setting("spissatus.selection.allow-auto-key-selection", "true");
+        }
+        if (options.flag("allow-deactivated-key")) {
+            builder.setting("spissatus.selection.allow-deactivated-encryption", "true");
         }
         return builder.build();
     }

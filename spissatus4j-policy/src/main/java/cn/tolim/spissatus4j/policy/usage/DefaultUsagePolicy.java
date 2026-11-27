@@ -19,8 +19,10 @@ import java.util.Objects;
  * requested {@link Operation} to the single {@link KeyUsage} the key must
  * carry, checks that the lifecycle state may protect new data (ENCRYPT, SIGN,
  * WRAP, MAC, DERIVE) or process historical data (DECRYPT, VERIFY, UNWRAP), and
- * rejects expired keys. Lifecycle operations that do not consume a key usage
- * are left to the key manager.</p>
+ * rejects expired keys. ENCRYPT with a DEACTIVATED key is allowed only when
+ * the request carries the operator-and-request opt-in flag; the key manager
+ * enforces the same switch before material is read. Lifecycle operations that
+ * do not consume a key usage are left to the key manager.</p>
  */
 public final class DefaultUsagePolicy implements UsagePolicy {
 
@@ -66,9 +68,14 @@ public final class DefaultUsagePolicy implements UsagePolicy {
             return PolicyDecision.deny(ReasonCodes.KEY_USAGE_MISMATCH,
                     "Key usage does not permit this operation", RULE_ID);
         }
-        boolean suitable = protecting(required)
-                ? key.state().canProtect()
-                : key.state().canProcessHistoricalData();
+        boolean suitable;
+        if (protecting(required)) {
+            suitable = key.state().canProtect()
+                    || (required == KeyUsage.ENCRYPT && request.allowDeactivatedEncryption()
+                        && key.state() == KeyState.DEACTIVATED);
+        } else {
+            suitable = key.state().canProcessHistoricalData();
+        }
         if (!suitable) {
             return PolicyDecision.deny(ReasonCodes.KEY_NOT_ACTIVE,
                     "Key state does not permit this operation", RULE_ID);

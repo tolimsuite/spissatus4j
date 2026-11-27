@@ -9,25 +9,34 @@ spissatus4j 的重要变更记录在此。
 - 统一 `Spissatus.encrypt(UnifiedEncryptRequest)` / `decrypt(UnifiedDecryptRequest)` 入口：
   从已安装、合规、已授权且与密钥兼容的能力中确定性选择唯一主算法；支持有序候选、命名套件与
   `AUTO_AEAD` / `AUTO_AEAD_THEN_ETM` / FIPS / GM profile。
-- 信封 v2：`headerHash` 以 SHA-256 绑定版本、算法、keyId、创建时间、salt/KDF 与属性；
-  有效 AAD 域分隔，解密时重建。v2 仅限对称 AEAD/EtM；非对称算法因不接收 AAD，仍使用低层 API
-  与 v1 信封。
+- 信封 v2：`headerHash` 以 SHA-256 绑定版本、算法、keyId、已解析的密钥版本、创建时间、
+  salt/KDF 与属性；有效 AAD 域分隔，解密时重建。对称 AEAD/EtM 将 headerHash 作为 AAD 认证；
+  非对称算法不接收 AAD，因此将其作为密文前缀并在返回明文前校验。
+- 租户内显式自动选钥（`allow-auto-key-selection` + `autoKeySelection`）：有界、非策略的描述符
+  枚举与确定性排序；选中密钥仍只执行一次权威策略决策。
+- DEACTIVATED 密钥加密双重开关（`allow-deactivated-encryption` + 请求标志）；默认 usage 策略
+  认可该标志，且每次覆盖都会写入 `KEY_STATE_OVERRIDE` 审计事件。
 - `PolicyEngine` 选择 hints（非权威、不产生限流副作用）；选择报告、能力视图、审计事件与有界指标。
-- Spring Boot `spissatus.selection.*` 配置；CLI 统一加密/解密、`--keys`、`--suite`、`--profile`
+- Spring Boot `spissatus.selection.*` 配置（含自动选钥与 DEACTIVATED 加密上限）；CLI 统一
+  加密/解密支持 `--keys`、`--suite`、`--profile`、`--auto-key`、`--allow-deactivated-key`
   与 `--allow-legacy-v1`。
 - 默认密钥管理器支持 ChaCha20-Poly1305 密钥生成。
 
 ### 安全
 
-- 对称 AEAD/EtM 的 v2 信封元数据被篡改时在解密前发现；v1 旧信封需要请求标志与操作员上限同时
-  允许。CLI 解密 v1 需要 `--allow-legacy-v1`。
-- `keyVersion` 不进入 v2 `headerHash`；需要钉死版本时使用 `expectedKeyVersion`。
-- 操作员 `spissatus.selection.allow-*` 是硬上限；请求标志不能开启被操作员关闭的能力。CLI 标志
-  会同时设置两侧。
+- 对称 AEAD/EtM 的 v2 信封元数据被篡改时在解密前发现；非对称信封在解密后、返回明文前发现。
+  v1 旧信封需要请求标志与操作员上限同时允许。CLI 解密 v1 需要 `--allow-legacy-v1`。
+- `keyVersion` 进入 v2 `headerHash`；即使两个版本材料相同，替换版本也会改变受认证元数据。
+  `expectedKeyVersion` 仍可作为显式钉死。
+- 操作员 `spissatus.selection.allow-*` 是硬上限；请求标志不能开启被操作员关闭的能力（包括
+  低层 `EncryptRequest` 调用）。CLI 标志会同时设置两侧。
+- 自动选钥枚举绝不调用策略引擎、不触发轮换、不消耗限流令牌，也不返回其他租户的密钥。
 - 统一解密将 tag、padding 与密文失败统一泛化为认证失败。
 - 每次统一操作仅一次权威策略决策；策略拒绝不切换到其他算法或密钥。
 - FIPS/GM 路由按合规模式与 Provider 能力过滤；`Capabilities.fipsAvailable` 改为反映已安装的
   FIPS-capable Provider。
+- v2 头部域在发布前已最终确定（现包含密钥版本与非对称绑定）；由未发布的旧构建生成的 v2 信封
+  需要重新加密。
 - 流式指标使用有界算法标签（未注册为 `unknown`）。
 
 ## [0.1.0] - 2026-11-26

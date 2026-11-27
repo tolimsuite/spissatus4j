@@ -16,6 +16,7 @@ public final class EncryptRequest {
     private final AAD aad;
     private final CallerContext caller;
     private final Map<String, String> attributes;
+    private final boolean allowDeactivatedKey;
 
     private EncryptRequest(Builder builder) {
         this.algorithm = Objects.requireNonNull(builder.algorithm, "algorithm");
@@ -25,6 +26,7 @@ public final class EncryptRequest {
         this.aad = Objects.requireNonNull(builder.aad, "aad");
         this.caller = Objects.requireNonNull(builder.caller, "caller");
         this.attributes = Map.copyOf(Objects.requireNonNull(builder.attributes, "attributes"));
+        this.allowDeactivatedKey = builder.allowDeactivatedKey;
     }
 
     public static Builder builder(AlgorithmId algorithm, KeyId keyId, byte[] plaintext, CallerContext caller) {
@@ -59,6 +61,15 @@ public final class EncryptRequest {
         return attributes;
     }
 
+    /**
+     * Whether this request explicitly asks to encrypt with a DEACTIVATED key.
+     * The facade only honors it when the operator setting also allows it; the
+     * authoritative policy decision still applies.
+     */
+    public boolean allowDeactivatedKey() {
+        return allowDeactivatedKey;
+    }
+
     @Override
     public String toString() {
         return "EncryptRequest[algorithm=" + algorithm + ", keyId=" + keyId
@@ -73,6 +84,7 @@ public final class EncryptRequest {
         private AAD aad = AAD.empty();
         private CallerContext caller;
         private Map<String, String> attributes = Map.of();
+        private boolean allowDeactivatedKey;
 
         public Builder algorithm(AlgorithmId value) {
             this.algorithm = value;
@@ -106,6 +118,11 @@ public final class EncryptRequest {
 
         public Builder attributes(Map<String, String> value) {
             this.attributes = value;
+            return this;
+        }
+
+        public Builder allowDeactivatedKey(boolean value) {
+            this.allowDeactivatedKey = value;
             return this;
         }
 
