@@ -1,7 +1,7 @@
 package cn.tolim.spissatus4j.starter.autoconfigure;
 
-import cn.tolim.spissatus4j.contract.api.Spissatus;
-import cn.tolim.spissatus4j.contract.api.SpissatusBuilder;
+import cn.tolim.spissatus4j.contract.facade.Spissatus;
+import cn.tolim.spissatus4j.contract.facade.SpissatusBuilder;
 import cn.tolim.spissatus4j.contract.runtime.SensitiveDataRedactor;
 import cn.tolim.spissatus4j.core.builder.SpissatusBuilders;
 import cn.tolim.spissatus4j.core.runtime.DefaultSensitiveDataRedactor;

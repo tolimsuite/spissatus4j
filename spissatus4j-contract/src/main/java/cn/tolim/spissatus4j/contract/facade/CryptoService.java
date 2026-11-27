@@ -1,4 +1,4 @@
-package cn.tolim.spissatus4j.contract.api;
+package cn.tolim.spissatus4j.contract.facade;
 
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
 import cn.tolim.spissatus4j.contract.crypto.DecryptRequest;

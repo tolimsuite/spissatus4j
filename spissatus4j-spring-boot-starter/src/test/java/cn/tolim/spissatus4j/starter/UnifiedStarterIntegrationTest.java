@@ -5,7 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
 import cn.tolim.spissatus4j.contract.algorithm.KeyUsage;
-import cn.tolim.spissatus4j.contract.api.Spissatus;
+import cn.tolim.spissatus4j.contract.facade.Spissatus;
 import cn.tolim.spissatus4j.contract.envelope.BinaryEncoding;
 import cn.tolim.spissatus4j.contract.envelope.EnvelopeFormat;
 import cn.tolim.spissatus4j.contract.exception.EnvelopeException;

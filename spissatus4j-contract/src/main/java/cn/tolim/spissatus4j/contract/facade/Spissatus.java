@@ -1,4 +1,4 @@
-package cn.tolim.spissatus4j.contract.api;
+package cn.tolim.spissatus4j.contract.facade;
 
 import cn.tolim.spissatus4j.contract.audit.AuditTrail;
 import cn.tolim.spissatus4j.contract.audit.MetricsRecorder;

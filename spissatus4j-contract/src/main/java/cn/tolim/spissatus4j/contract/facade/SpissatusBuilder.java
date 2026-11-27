@@ -1,4 +1,4 @@
-package cn.tolim.spissatus4j.contract.api;
+package cn.tolim.spissatus4j.contract.facade;
 
 import cn.tolim.spissatus4j.contract.audit.AlertSink;
 import cn.tolim.spissatus4j.contract.audit.AuditSink;

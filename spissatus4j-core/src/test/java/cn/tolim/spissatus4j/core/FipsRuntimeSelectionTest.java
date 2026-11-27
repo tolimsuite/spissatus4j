@@ -4,7 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
-import cn.tolim.spissatus4j.contract.api.Spissatus;
+import cn.tolim.spissatus4j.contract.facade.Spissatus;
 import cn.tolim.spissatus4j.contract.compliance.ComplianceMode;
 import cn.tolim.spissatus4j.contract.crypto.AAD;
 import cn.tolim.spissatus4j.contract.crypto.DecryptRequest;
