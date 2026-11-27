@@ -17,8 +17,10 @@ import cn.tolim.spissatus4j.contract.key.KeyGenerationRequest;
 import cn.tolim.spissatus4j.contract.key.KeyId;
 import cn.tolim.spissatus4j.contract.key.KeyImportRequest;
 import cn.tolim.spissatus4j.contract.key.KeyManager;
+import cn.tolim.spissatus4j.contract.key.KeySelectionCandidate;
 import cn.tolim.spissatus4j.contract.key.KeyState;
 import cn.tolim.spissatus4j.contract.key.KeyType;
+import cn.tolim.spissatus4j.contract.key.KeyUseOptions;
 import cn.tolim.spissatus4j.contract.key.KeyVersion;
 import cn.tolim.spissatus4j.contract.key.KeyWrapper;
 import cn.tolim.spissatus4j.contract.key.RotationPolicy;
@@ -87,6 +89,18 @@ public final class DefaultKeyManager implements KeyManager {
     private final java.util.Set<String> crossTenantRoles;
     private static final String ADMIN_ROLE = "crypto-admin";
     private static final SecureRandom RANDOM = new SecureRandom();
+
+    /**
+     * Deterministic order for advisory key discovery: latest active keys
+     * first, then deactivated keys; ties break on key id and version so the
+     * selection is reproducible across provider implementations.
+     */
+    private static final Comparator<KeyDescriptor> CANDIDATE_ORDER =
+            Comparator.comparingInt((KeyDescriptor key) ->
+                            key.state() == KeyState.ACTIVE ? 0 : 1)
+                    .thenComparing(KeyDescriptor::createdAt, Comparator.reverseOrder())
+                    .thenComparing(key -> key.keyId().value())
+                    .thenComparing(key -> key.version().value(), Comparator.reverseOrder());
 
     private final KeyProvider provider;
     private final List<KeyWrapper> wrappers;
@@ -553,11 +567,18 @@ public final class DefaultKeyManager implements KeyManager {
     @Override
     public KeyDescriptor resolveForUse(KeyId keyId, Long requestedVersion, KeyUsage usage,
                                        CallerContext caller) {
+        return resolveForUse(keyId, requestedVersion, usage, caller, KeyUseOptions.STRICT);
+    }
+
+    @Override
+    public KeyDescriptor resolveForUse(KeyId keyId, Long requestedVersion, KeyUsage usage,
+                                       CallerContext caller, KeyUseOptions options) {
+        KeyUseOptions effective = effectiveOptions(options);
         synchronized (useLock) {
             KeyVersion version = toKeyVersion(requestedVersion);
-            KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller, false);
+            KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller, effective);
             if (KeySupport.isProtecting(usage)) {
-                if (requestedVersion == null) {
+                if (requestedVersion == null && descriptor.state() == KeyState.ACTIVE) {
                     descriptor = maybeRotate(descriptor, caller);
                 }
                 descriptor = incrementUsage(descriptor);
@@ -575,30 +596,90 @@ public final class DefaultKeyManager implements KeyManager {
     @Override
     public KeyDescriptor peekForUse(KeyId keyId, Long requestedVersion, KeyUsage usage,
                                     CallerContext caller) {
+        return peekForUse(keyId, requestedVersion, usage, caller, KeyUseOptions.STRICT);
+    }
+
+    @Override
+    public KeyDescriptor peekForUse(KeyId keyId, Long requestedVersion, KeyUsage usage,
+                                    CallerContext caller, KeyUseOptions options) {
         synchronized (useLock) {
-            return selectForUse(keyId, toKeyVersion(requestedVersion), usage, caller, false);
+            return selectForUse(keyId, toKeyVersion(requestedVersion), usage, caller,
+                    effectiveOptions(options));
         }
     }
 
     @Override
     public SecretKey secretKey(KeyId keyId, KeyVersion version, KeyUsage usage,
                                CallerContext caller) {
-        KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller, false);
+        return secretKey(keyId, version, usage, caller, KeyUseOptions.STRICT);
+    }
+
+    @Override
+    public SecretKey secretKey(KeyId keyId, KeyVersion version, KeyUsage usage,
+                               CallerContext caller, KeyUseOptions options) {
+        KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller,
+                effectiveOptions(options));
         return secretMaterial(descriptor);
     }
 
     @Override
     public PrivateKey privateKey(KeyId keyId, KeyVersion version, KeyUsage usage,
                                  CallerContext caller) {
-        KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller, false);
+        return privateKey(keyId, version, usage, caller, KeyUseOptions.STRICT);
+    }
+
+    @Override
+    public PrivateKey privateKey(KeyId keyId, KeyVersion version, KeyUsage usage,
+                                 CallerContext caller, KeyUseOptions options) {
+        KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller,
+                effectiveOptions(options));
         return privateMaterial(descriptor);
     }
 
     @Override
     public PublicKey publicKey(KeyId keyId, KeyVersion version, KeyUsage usage,
                                CallerContext caller) {
-        KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller, false);
+        return publicKey(keyId, version, usage, caller, KeyUseOptions.STRICT);
+    }
+
+    @Override
+    public PublicKey publicKey(KeyId keyId, KeyVersion version, KeyUsage usage,
+                               CallerContext caller, KeyUseOptions options) {
+        KeyDescriptor descriptor = selectForUse(keyId, version, usage, caller,
+                effectiveOptions(options));
         return publicMaterial(descriptor);
+    }
+
+    @Override
+    public List<KeySelectionCandidate> candidateKeys(KeyUsage usage, CallerContext caller,
+                                                     int limit) {
+        requireOpen();
+        requireCaller(caller);
+        Objects.requireNonNull(usage, "usage");
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be positive");
+        }
+        String tenant = caller.tenantId();
+        List<StoredKey> stored;
+        try {
+            stored = provider.list(tenant);
+        } catch (KeyException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw providerFailure();
+        }
+        Instant now = clock.instant();
+        return stored.stream()
+                .map(StoredKey::descriptor)
+                .filter(descriptor -> tenant.equals(descriptor.tenantId()))
+                .filter(descriptor -> descriptor.state() == KeyState.ACTIVE
+                        || descriptor.state() == KeyState.DEACTIVATED)
+                .filter(descriptor -> descriptor.supportsUsage(usage))
+                .filter(descriptor -> !descriptor.expired(now))
+                .sorted(CANDIDATE_ORDER)
+                .limit(limit)
+                .map(KeySelectionCandidate::from)
+                .toList();
     }
 
     @Override
@@ -815,7 +896,7 @@ public final class DefaultKeyManager implements KeyManager {
     }
 
     private KeyDescriptor selectForUse(KeyId keyId, KeyVersion requestedVersion, KeyUsage usage,
-                                       CallerContext caller, boolean checkPolicy) {
+                                       CallerContext caller, KeyUseOptions options) {
         requireOpen();
         requireCaller(caller);
         Objects.requireNonNull(keyId, "keyId");
@@ -832,32 +913,42 @@ public final class DefaultKeyManager implements KeyManager {
                     .orElseThrow(() -> new KeyException(ErrorCode.KEY_VERSION_NOT_FOUND,
                             "Key version was not found"));
         } else {
+            Comparator<StoredKey> newest = Comparator.comparingLong(
+                    stored -> stored.descriptor().version().value());
             selected = versions.stream()
                     .filter(stored -> stored.descriptor().state() == KeyState.ACTIVE)
-                    .max(Comparator.comparingLong(
-                            stored -> stored.descriptor().version().value()))
-                    .orElseThrow(() -> new KeyException(ErrorCode.KEY_NOT_ACTIVE,
-                            "No active key version"));
+                    .max(newest)
+                    .orElse(null);
+            if (selected == null && usage == KeyUsage.ENCRYPT
+                    && options.allowDeactivatedEncryption()) {
+                selected = versions.stream()
+                        .filter(stored -> stored.descriptor().state() == KeyState.DEACTIVATED)
+                        .max(newest)
+                        .orElse(null);
+            }
+            if (selected == null) {
+                throw new KeyException(ErrorCode.KEY_NOT_ACTIVE, "No active key version");
+            }
         }
         KeyDescriptor descriptor = selected.descriptor();
         Operation operation = operationForUsage(usage);
         checkTenant(descriptor, caller, operation);
-        if (checkPolicy) {
-            enforcePolicy(operation, caller, descriptor.algorithm(), keyId,
-                    descriptor.version(), descriptor, Map.of());
-        }
-        enforceUsable(descriptor, usage, clock.instant());
+        enforceUsable(descriptor, usage, clock.instant(), options);
         return descriptor;
     }
 
-    private void enforceUsable(KeyDescriptor descriptor, KeyUsage usage, Instant now) {
+    private void enforceUsable(KeyDescriptor descriptor, KeyUsage usage, Instant now,
+                               KeyUseOptions options) {
         KeyState state = descriptor.state();
         if (state.terminal()) {
             throw new KeyException(ErrorCode.KEY_DESTROYED, "Key material has been destroyed");
         }
         boolean protecting = KeySupport.isProtecting(usage);
         if (protecting || usage == KeyUsage.DERIVE) {
-            if (state != KeyState.ACTIVE) {
+            boolean usable = state == KeyState.ACTIVE
+                    || (usage == KeyUsage.ENCRYPT && state == KeyState.DEACTIVATED
+                        && options.allowDeactivatedEncryption());
+            if (!usable) {
                 throw new KeyException(ErrorCode.KEY_NOT_ACTIVE, "Key is not active");
             }
         } else if (!state.canProcessHistoricalData()) {
@@ -871,6 +962,10 @@ public final class DefaultKeyManager implements KeyManager {
             throw new KeyException(ErrorCode.KEY_USAGE_VIOLATION,
                     "Key does not permit the requested usage");
         }
+    }
+
+    private static KeyUseOptions effectiveOptions(KeyUseOptions options) {
+        return options == null ? KeyUseOptions.STRICT : options;
     }
 
     private SecretKey secretMaterial(KeyDescriptor descriptor) {

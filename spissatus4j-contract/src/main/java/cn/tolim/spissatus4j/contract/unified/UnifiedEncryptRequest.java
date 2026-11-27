@@ -14,9 +14,13 @@ import java.util.Objects;
 /**
  * Request for the unified encryption entry point.
  *
- * <p>Selection intent is mutually exclusive: an exact algorithm, an exact
- * suite, an ordered candidate list, or a profile. The profile is applied only
- * when the caller supplied no explicit selection intent.</p>
+ * <p>The key source is exactly one of {@code keyId}, {@code candidateKeyIds}
+ * or opt-in automatic selection within the caller's tenant. Selection intent
+ * is mutually exclusive: an exact algorithm, an exact suite, an ordered
+ * candidate list, or a profile. The profile is applied only when the caller
+ * supplied no explicit selection intent. {@code allowDeactivatedKey} is the
+ * request half of the DEACTIVATED-encryption double opt-in; the operator
+ * setting must also allow it and policy still decides.</p>
  */
 public final class UnifiedEncryptRequest {
 
@@ -33,6 +37,8 @@ public final class UnifiedEncryptRequest {
     private final boolean allowDeprecated;
     private final boolean allowExperimental;
     private final boolean allowFamilyReuse;
+    private final boolean allowDeactivatedKey;
+    private final boolean autoKeySelection;
     private final EnvelopeFormat format;
     private final BinaryEncoding encoding;
     private final Map<String, String> attributes;
@@ -51,6 +57,8 @@ public final class UnifiedEncryptRequest {
         this.allowDeprecated = builder.allowDeprecated;
         this.allowExperimental = builder.allowExperimental;
         this.allowFamilyReuse = builder.allowFamilyReuse;
+        this.allowDeactivatedKey = builder.allowDeactivatedKey;
+        this.autoKeySelection = builder.autoKeySelection;
         this.format = builder.format;
         this.encoding = builder.encoding;
         this.attributes = Map.copyOf(builder.attributes);
@@ -63,6 +71,15 @@ public final class UnifiedEncryptRequest {
     public static Builder builder(List<KeyId> candidateKeyIds, byte[] plaintext,
                                   CallerContext caller) {
         return new Builder().candidateKeyIds(candidateKeyIds).plaintext(plaintext).caller(caller);
+    }
+
+    /**
+     * Builder for opt-in automatic key selection within the caller's tenant.
+     * The operator setting {@code spissatus.selection.allow-auto-key-selection}
+     * must also be enabled, otherwise selection is denied.
+     */
+    public static Builder builderAutoKey(byte[] plaintext, CallerContext caller) {
+        return new Builder().autoKeySelection(true).plaintext(plaintext).caller(caller);
     }
 
     public KeyId keyId() {
@@ -117,6 +134,16 @@ public final class UnifiedEncryptRequest {
         return allowFamilyReuse;
     }
 
+    /** Explicit request-side opt-in for DEACTIVATED-key encryption. */
+    public boolean allowDeactivatedKey() {
+        return allowDeactivatedKey;
+    }
+
+    /** Whether the caller asked to select a key automatically within the tenant. */
+    public boolean autoKeySelection() {
+        return autoKeySelection;
+    }
+
     public EnvelopeFormat format() {
         return format;
     }
@@ -137,6 +164,7 @@ public final class UnifiedEncryptRequest {
                 + ", suite=" + (suite == null ? "none" : suite.id())
                 + ", candidates=" + candidates.size()
                 + ", profile=" + profile
+                + ", autoKeySelection=" + autoKeySelection
                 + ", plaintextLength=" + plaintext.length
                 + ", aadLength=" + aad.length()
                 + ", attributes=" + attributes.size() + "]";
@@ -157,6 +185,8 @@ public final class UnifiedEncryptRequest {
         private boolean allowDeprecated;
         private boolean allowExperimental;
         private boolean allowFamilyReuse;
+        private boolean allowDeactivatedKey;
+        private boolean autoKeySelection;
         private EnvelopeFormat format = EnvelopeFormat.JSON;
         private BinaryEncoding encoding = BinaryEncoding.BASE64;
         private Map<String, String> attributes = Map.of();
@@ -229,6 +259,16 @@ public final class UnifiedEncryptRequest {
             return this;
         }
 
+        public Builder allowDeactivatedKey(boolean value) {
+            this.allowDeactivatedKey = value;
+            return this;
+        }
+
+        public Builder autoKeySelection(boolean value) {
+            this.autoKeySelection = value;
+            return this;
+        }
+
         public Builder format(EnvelopeFormat value) {
             this.format = value;
             return this;
@@ -259,9 +299,15 @@ public final class UnifiedEncryptRequest {
 
             boolean hasKey = keyId != null;
             boolean hasCandidates = !candidateKeyIds.isEmpty();
-            if (hasKey == hasCandidates) {
+            int keySources = (hasKey ? 1 : 0) + (hasCandidates ? 1 : 0)
+                    + (autoKeySelection ? 1 : 0);
+            if (keySources != 1) {
                 throw new IllegalArgumentException(
-                        "Exactly one of keyId or candidateKeyIds is required");
+                        "Exactly one of keyId, candidateKeyIds or autoKeySelection is required");
+            }
+            if (autoKeySelection && keyVersion != null) {
+                throw new IllegalArgumentException(
+                        "keyVersion cannot be combined with automatic key selection");
             }
             if (hasCandidates) {
                 LinkedHashSet<KeyId> unique = new LinkedHashSet<>(candidateKeyIds);

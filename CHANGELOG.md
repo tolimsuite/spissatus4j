@@ -10,31 +10,44 @@ All notable changes to spissatus4j are documented here.
   deterministic selection of one primary algorithm from installed, compliant, authorized and
   key-compatible capabilities; ordered candidate lists, named suites and `AUTO_AEAD` /
   `AUTO_AEAD_THEN_ETM` / FIPS / GM profiles.
-- Envelope version 2 with a SHA-256 `headerHash` binding version, algorithm, key id, creation time,
-  salt/KDF metadata and attributes; effective AAD is domain-separated and reconstructed on decrypt.
-  V2 envelopes are limited to symmetric AEAD/EtM algorithms; asymmetric algorithms remain on the
-  low-level API and v1 envelopes because they take no AAD.
+- Envelope version 2 with a SHA-256 `headerHash` binding version, algorithm, key id, resolved key
+  version, creation time, salt/KDF metadata and attributes; effective AAD is domain-separated and
+  reconstructed on decrypt. Symmetric AEAD/EtM envelopes authenticate the hash as AAD; asymmetric
+  envelopes carry it as a ciphertext prefix because asymmetric ciphers take no AAD.
+- Opt-in automatic key selection within the caller's tenant (`allow-auto-key-selection` plus
+  `autoKeySelection`), backed by bounded, non-policy descriptor enumeration and deterministic
+  ordering; the selected key still receives exactly one authoritative policy decision.
+- Opt-in DEACTIVATED-key encryption (`allow-deactivated-encryption` plus the request flag); the
+  default usage policy honors the flag and every override emits a `KEY_STATE_OVERRIDE` audit event.
 - Selection hints on `PolicyEngine` (non-authoritative, no rate-limit side effects); selection
   reports, capabilities view, audit events and bounded metrics.
-- Spring Boot `spissatus.selection.*` properties and CLI unified encrypt/decrypt, `--keys`,
-  `--suite`, `--profile` and `--allow-legacy-v1`.
+- Spring Boot `spissatus.selection.*` properties, including automatic-selection and
+  deactivated-encryption ceilings, and CLI unified encrypt/decrypt with `--keys`, `--suite`,
+  `--profile`, `--auto-key`, `--allow-deactivated-key` and `--allow-legacy-v1`.
 - ChaCha20-Poly1305 key generation in the default key manager.
 
 ### Security
 
 - V2 envelope metadata tampering is detected before decryption for symmetric AEAD/EtM envelopes;
-  v1 envelopes are rejected by the unified entry unless both the request flag and the operator
-  ceiling allow them. The CLI now requires `--allow-legacy-v1` for v1 input.
-- `keyVersion` is not part of the v2 header hash; pin it with `expectedKeyVersion` when version
-  substitution matters.
+  for asymmetric envelopes it is detected immediately after decryption and before returning
+  plaintext. V1 envelopes are rejected by the unified entry unless both the request flag and the
+  operator ceiling allow them. The CLI now requires `--allow-legacy-v1` for v1 input.
+- `keyVersion` is part of the v2 header hash, so a substituted version changes the authenticated
+  metadata even when two versions share identical material; `expectedKeyVersion` remains available
+  as an explicit pin.
 - Operator `spissatus.selection.allow-*` settings are hard ceilings; request flags cannot enable a
-  capability the operator disabled. CLI flags set both sides.
+  capability the operator disabled, including low-level `EncryptRequest` calls. CLI flags set both
+  sides.
+- Automatic key enumeration never calls the policy engine, rotates keys, consumes rate-limit tokens
+  or returns another tenant's keys.
 - Unified decryption maps tag, padding and ciphertext failures to a generic authentication error.
 - One authoritative policy decision per unified operation; policy denials never fall back to another
   algorithm or key.
 - FIPS/GM routing filters by compliance and provider capability; `Capabilities.fipsAvailable` now
   reflects installed FIPS-capable providers.
 - Stream metrics use bounded algorithm tags (`unknown` for unregistered ids).
+- The v2 header domain was finalized before release (it now includes the key version and asymmetric
+  binding); v2 envelopes produced by an unreleased pre-change build must be re-encrypted.
 
 ## [0.1.0] - 2026-11-26
 

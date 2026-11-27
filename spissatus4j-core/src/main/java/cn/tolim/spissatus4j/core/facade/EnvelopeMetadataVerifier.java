@@ -50,4 +50,14 @@ final class EnvelopeMetadataVerifier {
                     "Envelope authenticated data is invalid");
         }
     }
+
+    /**
+     * Verifies and strips the header binding that asymmetric v2 envelopes
+     * carry inside their ciphertext. Must be called before returning plaintext.
+     */
+    static byte[] verifyAsymmetricPlaintext(Envelope envelope, byte[] plaintext) {
+        Objects.requireNonNull(envelope, "envelope");
+        Objects.requireNonNull(plaintext, "plaintext");
+        return EnvelopeBinding.verifyAsymmetricPlaintext(plaintext, envelope.headerHash());
+    }
 }

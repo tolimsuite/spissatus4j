@@ -7,6 +7,7 @@ import cn.tolim.spissatus4j.contract.key.KeyGenerationRequest;
 import cn.tolim.spissatus4j.contract.key.KeyId;
 import cn.tolim.spissatus4j.contract.key.KeyImportRequest;
 import cn.tolim.spissatus4j.contract.key.KeyManager;
+import cn.tolim.spissatus4j.contract.key.KeySelectionCandidate;
 import cn.tolim.spissatus4j.contract.key.KeyState;
 import cn.tolim.spissatus4j.contract.key.KeyType;
 import cn.tolim.spissatus4j.contract.key.KeyVersion;
@@ -144,6 +145,16 @@ final class TestKeyManager implements KeyManager {
     @Override
     public List<KeyDescriptor> list(String tenantId, CallerContext caller) {
         return List.of(descriptor);
+    }
+
+    @Override
+    public List<KeySelectionCandidate> candidateKeys(KeyUsage usage, CallerContext caller,
+                                                     int limit) {
+        if (limit < 1 || !descriptor.supportsUsage(usage)
+                || !descriptor.tenantId().equals(caller.tenantId())) {
+            return List.of();
+        }
+        return List.of(KeySelectionCandidate.from(descriptor));
     }
 
     @Override

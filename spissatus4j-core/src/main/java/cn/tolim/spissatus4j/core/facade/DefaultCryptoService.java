@@ -46,7 +46,9 @@ import cn.tolim.spissatus4j.contract.exception.RuntimeSecurityException;
 import cn.tolim.spissatus4j.contract.exception.SpissatusException;
 import cn.tolim.spissatus4j.contract.key.KeyDescriptor;
 import cn.tolim.spissatus4j.contract.key.KeyId;
+import cn.tolim.spissatus4j.contract.key.KeyState;
 import cn.tolim.spissatus4j.contract.key.KeyType;
+import cn.tolim.spissatus4j.contract.key.KeyUseOptions;
 import cn.tolim.spissatus4j.contract.key.KeyVersion;
 import cn.tolim.spissatus4j.contract.policy.CallerContext;
 import cn.tolim.spissatus4j.contract.policy.PolicyDecision;
@@ -90,11 +92,40 @@ public final class DefaultCryptoService implements CryptoService {
         this.context = Objects.requireNonNull(context, "context");
     }
 
+    /**
+     * Cipher input resolved after the key version is known. The unified entry
+     * point uses this to bind the envelope metadata, including the resolved
+     * key version, into the authenticated ciphertext.
+     */
+    record BoundPayload(byte[] plaintext, AAD aad, byte[] headerHash) {
+
+        BoundPayload {
+            plaintext = Objects.requireNonNull(plaintext, "plaintext").clone();
+            aad = Objects.requireNonNull(aad, "aad");
+            headerHash = Objects.requireNonNull(headerHash, "headerHash").clone();
+        }
+
+        @Override
+        public byte[] plaintext() {
+            return plaintext.clone();
+        }
+
+        @Override
+        public byte[] headerHash() {
+            return headerHash.clone();
+        }
+    }
+
+    @FunctionalInterface
+    interface BindingProvider {
+        BoundPayload bind(KeyVersion resolvedVersion);
+    }
+
     // ------------------------------------------------------------------ encryption
 
     @Override
     public EncryptedData encrypt(EncryptRequest request) {
-        return encrypt(request, context.clock().instant());
+        return encrypt(request, context.clock().instant(), null);
     }
 
     /**
@@ -102,9 +133,24 @@ public final class DefaultCryptoService implements CryptoService {
      * can bind the same instant into the envelope metadata hash.
      */
     EncryptedData encrypt(EncryptRequest request, Instant createdAt) {
+        return encrypt(request, createdAt, null);
+    }
+
+    /**
+     * Internal variant for bound envelopes. The binding callback runs after
+     * the key version has been resolved (including lazy rotation) and before
+     * any ciphertext is produced.
+     */
+    EncryptedData encryptBound(EncryptRequest request, Instant createdAt, BindingProvider binding) {
+        return encrypt(request, createdAt, Objects.requireNonNull(binding, "binding"));
+    }
+
+    private EncryptedData encrypt(EncryptRequest request, Instant createdAt, BindingProvider binding) {
         Objects.requireNonNull(request, "request");
         Objects.requireNonNull(createdAt, "createdAt");
         long started = System.nanoTime();
+        boolean allowDeactivated = allowDeactivatedEncryption(request);
+        KeyUseOptions useOptions = KeyUseOptions.forEncryption(allowDeactivated);
         try {
             ready("encrypt");
             AlgorithmInfo info = requireAlgorithm(request.algorithm());
@@ -118,8 +164,12 @@ public final class DefaultCryptoService implements CryptoService {
                     request.keyVersion());
             KeyDescriptor key = authorizeKey(Operation.ENCRYPT, request.algorithm(),
                     request.keyId(), request.keyVersion(), KeyUsage.ENCRYPT, request.caller(),
-                    request.attributes());
-            EncryptedData data = doEncrypt(request, info, key, createdAt);
+                    request.attributes(), useOptions, allowDeactivated);
+            BoundPayload bound = binding == null ? null : binding.bind(key.version());
+            EncryptedData data = doEncrypt(request, info, key, createdAt, bound, useOptions);
+            if (key.state() == KeyState.DEACTIVATED) {
+                auditDeactivatedUse(request, key);
+            }
             auditSuccess(AuditEventType.ENCRYPT, Operation.ENCRYPT, request.caller(),
                     request.algorithm(), key.version(), "Encryption completed");
             metricsSuccess(Operation.ENCRYPT, request.algorithm(), started);
@@ -133,17 +183,19 @@ public final class DefaultCryptoService implements CryptoService {
     }
 
     private EncryptedData doEncrypt(EncryptRequest request, AlgorithmInfo info, KeyDescriptor key,
-                                    Instant createdAt) {
+                                    Instant createdAt, BoundPayload bound,
+                                    KeyUseOptions useOptions) {
+        byte[] plaintext = bound == null ? request.plaintext() : bound.plaintext();
         if (info.family() == AlgorithmFamily.ASYMMETRIC) {
             if (!request.aad().isEmpty()) {
                 throw new CryptoException(ErrorCode.INVALID_PARAMETER,
                         "AAD is not supported for asymmetric encryption");
             }
-            PublicKey publicKey = publicKey(key, KeyUsage.ENCRYPT, request.caller());
+            PublicKey publicKey = publicKey(key, KeyUsage.ENCRYPT, request.caller(), useOptions);
             AsymmetricCipher cipher = requireAsymmetricCipher(request.algorithm());
             byte[] ciphertext;
             try {
-                ciphertext = cipher.encrypt(publicKey, request.plaintext());
+                ciphertext = cipher.encrypt(publicKey, plaintext);
             } catch (CryptoException e) {
                 throw e;
             } catch (RuntimeException e) {
@@ -161,13 +213,14 @@ public final class DefaultCryptoService implements CryptoService {
                     .build();
         }
 
-        SecretKey secretKey = secretKey(key, KeyUsage.ENCRYPT, request.caller());
+        AAD aad = bound == null ? request.aad() : bound.aad();
+        SecretKey secretKey = secretKey(key, KeyUsage.ENCRYPT, request.caller(), useOptions);
         AeadCipher cipher = requireAeadCipher(request.algorithm());
         Nonce nonce = freshNonce(request.algorithm(), cipher.nonceLength());
         registerNonce(request.algorithm(), nonce);
         AeadCipher.AeadResult result;
         try {
-            result = cipher.encrypt(secretKey, request.plaintext(), nonce, request.aad());
+            result = cipher.encrypt(secretKey, plaintext, nonce, aad);
         } catch (CryptoException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -184,9 +237,35 @@ public final class DefaultCryptoService implements CryptoService {
                 .nonce(result.nonce())
                 .ciphertext(result.ciphertext())
                 .tag(result.tag())
-                .aad(request.aad())
+                .aad(aad)
                 .createdAt(createdAt)
                 .build();
+    }
+
+    /**
+     * The operator setting is a hard ceiling for both the unified and low-level
+     * encryption entry points; the request flag alone never authorizes it.
+     */
+    private boolean allowDeactivatedEncryption(EncryptRequest request) {
+        if (!request.allowDeactivatedKey()) {
+            return false;
+        }
+        return Boolean.parseBoolean(context.settings()
+                .getOrDefault(SelectionSettings.ALLOW_DEACTIVATED_ENCRYPTION, "false"));
+    }
+
+    private void auditDeactivatedUse(EncryptRequest request, KeyDescriptor key) {
+        appendAudit(AuditEvent.builder(AuditEventType.KEY_STATE_OVERRIDE, AuditSeverity.WARN,
+                                AuditOutcome.SUCCESS)
+                        .caller(request.caller())
+                        .algorithm(request.algorithm())
+                        .keyId(key.keyId())
+                        .keyVersion(key.version())
+                        .operation(Operation.ENCRYPT)
+                        .message("Deactivated key used for encryption by explicit override")
+                        .detail("state", KeyState.DEACTIVATED.name())
+                        .build(),
+                false);
     }
 
     // ------------------------------------------------------------------ decryption
@@ -849,23 +928,33 @@ public final class DefaultCryptoService implements CryptoService {
     private KeyDescriptor authorizeKey(Operation operation, AlgorithmId algorithm, KeyId keyId,
                                        Long version, KeyUsage usage, CallerContext caller,
                                        Map<String, String> attributes) {
+        return authorizeKey(operation, algorithm, keyId, version, usage, caller, attributes,
+                KeyUseOptions.STRICT, false);
+    }
+
+    private KeyDescriptor authorizeKey(Operation operation, AlgorithmId algorithm, KeyId keyId,
+                                       Long version, KeyUsage usage, CallerContext caller,
+                                       Map<String, String> attributes, KeyUseOptions useOptions,
+                                       boolean allowDeactivatedEncryption) {
         KeyDescriptor peeked;
         try {
-            peeked = context.keyManager().peekForUse(keyId, version, usage, caller);
+            peeked = context.keyManager().peekForUse(keyId, version, usage, caller, useOptions);
         } catch (SpissatusException e) {
             throw e;
         } catch (RuntimeException e) {
             throw new KeyException(ErrorCode.KEY_PROVIDER_FAILURE, "Key resolution failed", e);
         }
-        enforcePolicy(operation, algorithm, peeked, caller, attributes);
-        KeyDescriptor resolved = resolveKey(keyId, version, usage, caller);
+        enforcePolicy(operation, algorithm, peeked, caller, attributes,
+                allowDeactivatedEncryption);
+        KeyDescriptor resolved = resolveKey(keyId, version, usage, caller, useOptions);
         requireCompatibleKey(resolved, algorithm);
         return resolved;
     }
 
-    private KeyDescriptor resolveKey(KeyId keyId, Long version, KeyUsage usage, CallerContext caller) {
+    private KeyDescriptor resolveKey(KeyId keyId, Long version, KeyUsage usage, CallerContext caller,
+                                     KeyUseOptions useOptions) {
         try {
-            return context.keyManager().resolveForUse(keyId, version, usage, caller);
+            return context.keyManager().resolveForUse(keyId, version, usage, caller, useOptions);
         } catch (SpissatusException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -874,8 +963,14 @@ public final class DefaultCryptoService implements CryptoService {
     }
 
     private SecretKey secretKey(KeyDescriptor key, KeyUsage usage, CallerContext caller) {
+        return secretKey(key, usage, caller, KeyUseOptions.STRICT);
+    }
+
+    private SecretKey secretKey(KeyDescriptor key, KeyUsage usage, CallerContext caller,
+                                KeyUseOptions useOptions) {
         try {
-            return context.keyManager().secretKey(key.keyId(), key.version(), usage, caller);
+            return context.keyManager().secretKey(key.keyId(), key.version(), usage, caller,
+                    useOptions);
         } catch (SpissatusException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -894,8 +989,14 @@ public final class DefaultCryptoService implements CryptoService {
     }
 
     private PublicKey publicKey(KeyDescriptor key, KeyUsage usage, CallerContext caller) {
+        return publicKey(key, usage, caller, KeyUseOptions.STRICT);
+    }
+
+    private PublicKey publicKey(KeyDescriptor key, KeyUsage usage, CallerContext caller,
+                                KeyUseOptions useOptions) {
         try {
-            return context.keyManager().publicKey(key.keyId(), key.version(), usage, caller);
+            return context.keyManager().publicKey(key.keyId(), key.version(), usage, caller,
+                    useOptions);
         } catch (SpissatusException e) {
             throw e;
         } catch (RuntimeException e) {
@@ -905,9 +1006,16 @@ public final class DefaultCryptoService implements CryptoService {
 
     private PolicyDecision enforcePolicy(Operation operation, AlgorithmId algorithm, KeyDescriptor key,
                                          CallerContext caller, Map<String, String> attributes) {
+        return enforcePolicy(operation, algorithm, key, caller, attributes, false);
+    }
+
+    private PolicyDecision enforcePolicy(Operation operation, AlgorithmId algorithm, KeyDescriptor key,
+                                         CallerContext caller, Map<String, String> attributes,
+                                         boolean allowDeactivatedEncryption) {
         PolicyRequest.Builder builder = PolicyRequest.builder(operation, caller)
                 .algorithm(algorithm)
-                .attributes(attributes);
+                .attributes(attributes)
+                .allowDeactivatedEncryption(allowDeactivatedEncryption);
         if (key != null) {
             builder.key(key).keyId(key.keyId()).keyVersion(key.version());
         }

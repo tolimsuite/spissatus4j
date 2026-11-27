@@ -38,6 +38,8 @@ class SpissatusPropertiesTest {
                         "spissatus.selection.allow-experimental=true",
                         "spissatus.selection.allow-family-reuse=true",
                         "spissatus.selection.allow-legacy-v1=true",
+                        "spissatus.selection.allow-auto-key-selection=true",
+                        "spissatus.selection.allow-deactivated-encryption=true",
                         "spissatus.selection.max-candidates=8",
                         "spissatus.self-check.failure-fails-startup=false")
                 .run(context -> {
@@ -59,11 +61,17 @@ class SpissatusPropertiesTest {
                     assertThat(properties.getSelection().isAllowExperimental()).isTrue();
                     assertThat(properties.getSelection().isAllowFamilyReuse()).isTrue();
                     assertThat(properties.getSelection().isAllowLegacyV1()).isTrue();
+                    assertThat(properties.getSelection().isAllowAutoKeySelection()).isTrue();
+                    assertThat(properties.getSelection().isAllowDeactivatedEncryption()).isTrue();
                     assertThat(properties.getSelection().getMaxCandidates()).isEqualTo(8);
                     assertThat(settings.get("spissatus.selection.profile"))
                             .isEqualTo("AUTO_AEAD_THEN_ETM");
                     assertThat(settings.get("spissatus.selection.preferred-algorithms"))
                             .isEqualTo("AES-GCM,CHACHA20-POLY1305");
+                    assertThat(settings.get("spissatus.selection.allow-auto-key-selection"))
+                            .isEqualTo("true");
+                    assertThat(settings.get("spissatus.selection.allow-deactivated-encryption"))
+                            .isEqualTo("true");
                     assertThat(settings.get("spissatus.selection.max-candidates")).isEqualTo("8");
                     assertThat(settings.toString()).contains("redacted").doesNotContain("secret-value");
                     assertThat(SpissatusSettings.complianceMode(properties))

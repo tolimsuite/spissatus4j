@@ -61,6 +61,20 @@ class DefaultUsagePolicyTest {
     }
 
     @Test
+    void deactivatedKeyCanProtectOnlyWithTheExplicitOptIn() {
+        KeyDescriptor key = TestFixtures.key(KeyState.DEACTIVATED, Set.of(KeyUsage.ENCRYPT));
+
+        PolicyRequest optedIn = PolicyRequest.builder(Operation.ENCRYPT, TestFixtures.caller())
+                .key(key).allowDeactivatedEncryption(true).build();
+        assertTrue(policy.evaluate(optedIn).allowed());
+
+        PolicyRequest otherUsage = PolicyRequest.builder(Operation.SIGN, TestFixtures.caller())
+                .key(TestFixtures.key(KeyState.DEACTIVATED, Set.of(KeyUsage.SIGN)))
+                .allowDeactivatedEncryption(true).build();
+        assertEquals(ReasonCodes.KEY_NOT_ACTIVE, policy.evaluate(otherUsage).reasonCode());
+    }
+
+    @Test
     void deactivatedKeyCanProcessHistoricalData() {
         KeyDescriptor key = TestFixtures.key(KeyState.DEACTIVATED, Set.of(KeyUsage.DECRYPT));
 

@@ -20,7 +20,8 @@ public record PolicyRequest(
         KeyVersion keyVersion,
         KeyDescriptor key,
         CallerContext caller,
-        Map<String, String> attributes) {
+        Map<String, String> attributes,
+        boolean allowDeactivatedEncryption) {
 
     public PolicyRequest {
         Objects.requireNonNull(operation, "operation");
@@ -29,7 +30,7 @@ public record PolicyRequest(
     }
 
     public static PolicyRequest of(Operation operation, CallerContext caller) {
-        return new PolicyRequest(null, operation, null, null, null, caller, Map.of());
+        return new PolicyRequest(null, operation, null, null, null, caller, Map.of(), false);
     }
 
     public static Builder builder(Operation operation, CallerContext caller) {
@@ -44,6 +45,7 @@ public record PolicyRequest(
         private KeyDescriptor key;
         private CallerContext caller;
         private Map<String, String> attributes = Map.of();
+        private boolean allowDeactivatedEncryption;
 
         public Builder algorithm(AlgorithmId value) {
             this.algorithm = value;
@@ -80,8 +82,20 @@ public record PolicyRequest(
             return this;
         }
 
+        /**
+         * Marks this request as carrying the operator-and-request opt-in that
+         * allows ENCRYPT with a DEACTIVATED key. Set only by the facade after
+         * both switches are verified; a policy rule still makes the final
+         * decision.
+         */
+        public Builder allowDeactivatedEncryption(boolean value) {
+            this.allowDeactivatedEncryption = value;
+            return this;
+        }
+
         public PolicyRequest build() {
-            return new PolicyRequest(algorithm, operation, keyId, keyVersion, key, caller, attributes);
+            return new PolicyRequest(algorithm, operation, keyId, keyVersion, key, caller,
+                    attributes, allowDeactivatedEncryption);
         }
     }
 }

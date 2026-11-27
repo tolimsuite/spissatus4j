@@ -23,6 +23,10 @@ final class SelectionSettings {
     static final String ALLOW_EXPERIMENTAL = "spissatus.selection.allow-experimental";
     static final String ALLOW_FAMILY_REUSE = "spissatus.selection.allow-family-reuse";
     static final String ALLOW_LEGACY_V1 = "spissatus.selection.allow-legacy-v1";
+    static final String ALLOW_AUTO_KEY_SELECTION =
+            "spissatus.selection.allow-auto-key-selection";
+    static final String ALLOW_DEACTIVATED_ENCRYPTION =
+            "spissatus.selection.allow-deactivated-encryption";
     static final String MAX_CANDIDATES = "spissatus.selection.max-candidates";
     static final String ENVELOPE_MAX_BYTES = "spissatus.envelope.max-bytes";
 
@@ -33,6 +37,8 @@ final class SelectionSettings {
     private final boolean allowExperimental;
     private final boolean allowFamilyReuse;
     private final boolean allowLegacyV1;
+    private final boolean allowAutoKeySelection;
+    private final boolean allowDeactivatedEncryption;
     private final int maxCandidates;
     private final int envelopeMaxBytes;
 
@@ -45,6 +51,9 @@ final class SelectionSettings {
         this.allowExperimental = parseBoolean(settings, ALLOW_EXPERIMENTAL, false);
         this.allowFamilyReuse = parseBoolean(settings, ALLOW_FAMILY_REUSE, false);
         this.allowLegacyV1 = parseBoolean(settings, ALLOW_LEGACY_V1, false);
+        this.allowAutoKeySelection = parseBoolean(settings, ALLOW_AUTO_KEY_SELECTION, false);
+        this.allowDeactivatedEncryption = parseBoolean(settings, ALLOW_DEACTIVATED_ENCRYPTION,
+                false);
         this.maxCandidates = parseInt(settings, MAX_CANDIDATES, 32, 1, 128);
         this.envelopeMaxBytes = parseInt(settings, ENVELOPE_MAX_BYTES,
                 268_435_456, 1, Integer.MAX_VALUE);
@@ -84,6 +93,15 @@ final class SelectionSettings {
 
     boolean allowLegacyV1(boolean requested) {
         return allowLegacyV1 && requested;
+    }
+
+    boolean allowAutoKeySelection() {
+        return allowAutoKeySelection;
+    }
+
+    boolean allowDeactivatedEncryption(UnifiedEncryptRequest request) {
+        // Operator configuration is a hard ceiling; the caller must also opt in.
+        return allowDeactivatedEncryption && request.allowDeactivatedKey();
     }
 
     int maxCandidates() {

@@ -5,9 +5,10 @@ import java.util.Objects;
 
 /**
  * Envelope version policy supporting versions 1 and 2. Version 2 binds the
- * envelope metadata through a header hash; version 1 remains readable for
- * compatibility. Migration hints are non-sensitive guidance for callers that
- * encounter old or unsupported versions.
+ * envelope metadata, including the resolved key version, through a header
+ * hash; version 1 remains readable for compatibility. Migration hints are
+ * non-sensitive guidance for callers that encounter old or unsupported
+ * versions.
  */
 public final class DefaultVersionPolicy implements VersionPolicy {
 

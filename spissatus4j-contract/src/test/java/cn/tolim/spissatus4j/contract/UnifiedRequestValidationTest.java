@@ -41,6 +41,24 @@ class UnifiedRequestValidationTest {
                 () -> UnifiedEncryptRequest.builder(List.of(KEY, KEY), PLAINTEXT, CALLER).build());
         assertDoesNotThrow(() -> UnifiedEncryptRequest.builder(List.of(KEY), PLAINTEXT, CALLER)
                 .build());
+        assertDoesNotThrow(() -> UnifiedEncryptRequest.builderAutoKey(PLAINTEXT, CALLER).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> UnifiedEncryptRequest.builderAutoKey(PLAINTEXT, CALLER)
+                        .keyId(KEY).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> UnifiedEncryptRequest.builderAutoKey(PLAINTEXT, CALLER)
+                        .candidateKeyIds(List.of(KEY)).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> UnifiedEncryptRequest.builderAutoKey(PLAINTEXT, CALLER)
+                        .keyVersion(1L).build());
+    }
+
+    @Test
+    void deactivatedEncryptionOptInDefaultsToFalse() {
+        assertFalse(UnifiedEncryptRequest.builder(KEY, PLAINTEXT, CALLER).build()
+                .allowDeactivatedKey());
+        assertTrue(UnifiedEncryptRequest.builder(KEY, PLAINTEXT, CALLER)
+                .allowDeactivatedKey(true).build().allowDeactivatedKey());
     }
 
     @Test

@@ -29,8 +29,10 @@ import cn.tolim.spissatus4j.contract.key.KeyDescriptor;
 import cn.tolim.spissatus4j.contract.key.KeyGenerationRequest;
 import cn.tolim.spissatus4j.contract.key.KeyId;
 import cn.tolim.spissatus4j.contract.key.KeyImportRequest;
+import cn.tolim.spissatus4j.contract.key.KeySelectionCandidate;
 import cn.tolim.spissatus4j.contract.key.KeyState;
 import cn.tolim.spissatus4j.contract.key.KeyType;
+import cn.tolim.spissatus4j.contract.key.KeyUseOptions;
 import cn.tolim.spissatus4j.contract.key.KeyVersion;
 import cn.tolim.spissatus4j.contract.key.RotationPolicy;
 import cn.tolim.spissatus4j.contract.policy.CallerContext;
@@ -847,7 +849,58 @@ class DefaultKeyManagerTest {
         }
     }
 
-    private KeyDescriptor generate(KeyType type, AlgorithmId algorithm, int bits,
+    @Test
+void deactivatedEncryptionIsDeniedByDefaultAndAllowedWithOptions() {
+    KeyDescriptor descriptor = generate(KeyType.AES, AlgorithmId.AES_GCM, 0,
+            Set.of(ENCRYPT));
+    manager.deactivate(descriptor.keyId(), descriptor.version(), caller);
+
+    KeyException strict = assertThrows(KeyException.class,
+            () -> manager.resolveForUse(descriptor.keyId(), null, ENCRYPT, caller));
+    assertEquals(ErrorCode.KEY_NOT_ACTIVE, strict.errorCode());
+    KeyException plainPeek = assertThrows(KeyException.class,
+            () -> manager.peekForUse(descriptor.keyId(), null, ENCRYPT, caller));
+    assertEquals(ErrorCode.KEY_NOT_ACTIVE, plainPeek.errorCode());
+
+    KeyUseOptions permissive = KeyUseOptions.forEncryption(true);
+    KeyDescriptor resolved = manager.resolveForUse(descriptor.keyId(), null, ENCRYPT, caller,
+            permissive);
+    assertEquals(KeyState.DEACTIVATED, resolved.state());
+    assertNotNull(manager.secretKey(descriptor.keyId(), descriptor.version(), ENCRYPT, caller,
+            permissive));
+
+    KeyException signDenied = assertThrows(KeyException.class,
+            () -> manager.resolveForUse(descriptor.keyId(), null, SIGN, caller, permissive));
+    assertEquals(ErrorCode.KEY_NOT_ACTIVE, signDenied.errorCode());
+}
+
+@Test
+void candidateKeysAreTenantScopedActiveFirstAndBounded() {
+    KeyId active = KeyId.of("candidate-active");
+    KeyId retired = KeyId.of("candidate-retired");
+    manager.generate(KeyGenerationRequest.builder(KeyType.AES, AlgorithmId.AES_GCM,
+                    Set.of(ENCRYPT)).keyId(active).build(), caller);
+    manager.generate(KeyGenerationRequest.builder(KeyType.AES, AlgorithmId.AES_GCM,
+                    Set.of(ENCRYPT)).keyId(retired).build(), caller);
+    manager.deactivate(retired, KeyVersion.first(), caller);
+
+    CallerContext admin = TestSupport.caller("default", Set.of("crypto-admin"));
+    manager.generate(KeyGenerationRequest.builder(KeyType.AES, AlgorithmId.AES_GCM,
+                    Set.of(ENCRYPT)).keyId(KeyId.of("other-tenant"))
+            .tenantId("other-tenant").build(), admin);
+
+    List<KeySelectionCandidate> candidates = manager.candidateKeys(ENCRYPT, caller, 10);
+    assertEquals(List.of(active, retired), candidates.stream()
+            .map(KeySelectionCandidate::keyId).toList());
+    assertEquals(KeyState.ACTIVE, candidates.get(0).state());
+    assertEquals(KeyState.DEACTIVATED, candidates.get(1).state());
+
+    List<KeySelectionCandidate> bounded = manager.candidateKeys(ENCRYPT, caller, 1);
+    assertEquals(1, bounded.size());
+    assertEquals(active, bounded.get(0).keyId());
+}
+
+private KeyDescriptor generate(KeyType type, AlgorithmId algorithm, int bits,
                                    Set<KeyUsage> usages) {
         return manager.generate(KeyGenerationRequest.builder(type, algorithm, usages)
                 .keyBits(bits)

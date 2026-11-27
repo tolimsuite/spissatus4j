@@ -177,25 +177,31 @@ byte[] decrypted = facade.decrypt(
 - **选择**：显式算法、命名套件、有序候选列表或 profile。选择器过滤 `PROHIBITED`/`UNKNOWN`、
   合规不允许、Provider 不可用、密钥不兼容的候选，并返回有界 `SelectionReport`；随后由 crypto
   服务对选中密钥执行**恰好一次** `PolicyEngine.evaluate`。策略拒绝即终止，不回退。
-- **信封**：统一入口为对称 **AEAD/EtM** 算法生成 **v2** 信封。`headerHash` 是版本、算法、
-  keyId、创建时间、salt/KDF 与属性的 SHA-256 绑定；加密使用“域分隔的 headerHash + 调用方 AAD”
-  作为有效 AAD。对这些对称信封，篡改路由或元数据会在解密前失败。非对称算法仍通过低层 API 与
-  v1 信封使用，不属于合法 v2 算法。统一解密默认拒绝 v1 旧信封，除非请求 `allowLegacyV1(true)`
-  且操作员配置也允许；时间窗口检查只接受 v2。
-- **密钥版本**：`keyVersion` 有意不进入 `headerHash`；选错版本通常因密钥材料不同而标签失败。
-  若版本替换有影响，请用 `expectedKeyVersion` 钉死。导入/复用的相同密钥材料无法仅靠标签区分。
+- **信封**：统一入口为对称 **AEAD/EtM** 与**非对称**算法生成 **v2** 信封。`headerHash` 是版本、
+  算法、keyId、已解析的密钥版本、创建时间、salt/KDF 与属性的 SHA-256 绑定。对称算法使用
+  “域分隔的 headerHash + 调用方 AAD”作为有效 AAD，篡改会在解密前失败；非对称算法不接收 AAD，
+  因此 headerHash 作为前缀封装进密文，解密后、返回明文前校验。非对称算法只能显式选择，自动
+  profile 绝不选择它，且非对称请求不允许携带调用方 AAD。统一解密默认拒绝 v1 旧信封，除非请求
+  `allowLegacyV1(true)` 且操作员配置也允许；时间窗口检查只接受 v2。
+- **密钥版本**：已解析的 `keyVersion` 进入 `headerHash`；即使两个版本材料相同，替换版本也会改变
+  受认证的元数据。需要显式钉死时仍可使用 `expectedKeyVersion`。
 - **Profile**：`AUTO_AEAD`（默认）、`AUTO_AEAD_THEN_ETM`（显式启用 EtM 块模式）、`FIPS_AEAD`、
   `GM_AEAD`、`GM_HYBRID_AEAD`。自动档位绝不选择非对称算法、实验/弃用算法或更弱模式。
   `selectionCapabilities()` 只列出当前合规模式可用的 profile。
-- **密钥**：`keyId` 或显式的 `candidateKeyIds` 列表；本版本不做租户内自动密钥列举。仅 ACTIVE
-  密钥可加密；DEACTIVATED 密钥仅用于历史数据解密。候选列表中缺失的密钥会被记录并继续尝试
-  后续密钥；Provider 故障则终止。
+- **密钥**：`keyId`、显式 `candidateKeyIds` 列表，或调用方租户内的显式自动选钥。自动选钥只做
+  有界、非策略、非限流的元数据枚举，随后仍由选中密钥执行唯一一次权威策略决策；排序确定
+  （最新 ACTIVE 优先）。仅 ACTIVE 密钥默认可保护新数据；DEACTIVATED 密钥可用于历史解密，
+  只有在操作员配置 `allow-deactivated-encryption` 与请求标志同时开启时才可加密，策略引擎仍做
+  最终决定，且该覆盖会写入审计。候选列表中缺失的密钥会被记录并继续尝试后续密钥；Provider
+  故障则终止。
 - **能力视图**：`selectionCapabilities()` 列出 installed/compliant/available，不暴露 Provider 类型。
 - **配置**：`spissatus.selection.profile`、`preferred-algorithms`、`allow-deprecated`、
-  `allow-experimental`、`allow-family-reuse`、`allow-legacy-v1`、`max-candidates`。`allow-*`
-  是操作员上限，请求侧也必须显式开启；CLI 标志会同时设置两侧。
+  `allow-experimental`、`allow-family-reuse`、`allow-legacy-v1`、`allow-auto-key-selection`、
+  `allow-deactivated-encryption`、`max-candidates`。`allow-*` 是操作员上限，请求侧也必须显式
+  开启；CLI 标志会同时设置两侧。
 - **CLI 迁移**：`spissatus4j decrypt` 现在走统一入口并默认拒绝 v1；使用 `--allow-legacy-v1`
-  （同时为该进程打开操作员上限）或重新加密为 v2。库方法 `decryptEnvelope` 仍兼容 v1。
+  （同时为该进程打开操作员上限）或重新加密为 v2。`encrypt` 支持 `--auto-key` 与
+  `--allow-deactivated-key`。库方法 `decryptEnvelope` 仍兼容 v1。
 
 ## Spring Boot Starter（可选）
 
@@ -211,6 +217,10 @@ spissatus:
     allow-anonymous: false
     allowed-tenants: [tenant-a]
     rate-limit-per-minute: 6000
+  selection:
+    profile: AUTO_AEAD
+    allow-auto-key-selection: false
+    allow-deactivated-encryption: false
   self-check:
     on-startup: true
     failure-fails-startup: true
@@ -244,7 +254,9 @@ Starter 注册 `Spissatus` 与 `SpissatusLogSanitizer` Bean；不启动 Web 服�
 - **Nonce 跟踪**覆盖每次 AEAD/EtM 加密与每个流式 base nonce。
 - **Encrypt-then-MAC** 用于 AES-CBC/CTR/CFB/OFB 与 SM4-CBC/CTR，先恒定时间验证再解密。
 - **泛化认证失败**，不区分填充、Tag 与密钥错误。
-- **密钥状态与用途隔离**：仅 ACTIVE 密钥可保护新数据；DEACTIVATED 仅处理历史数据。
+- **密钥状态与用途隔离**：默认仅 ACTIVE 密钥可保护新数据；DEACTIVATED 处理历史数据，只有在
+  文档化的操作员与请求双重开关下才可加密。
+- **自动选钥从不授权**：枚举是有界、租户内、无策略副作用的；选中密钥仍只执行一次权威策略决策。
 - **FIPS 模式**只选择声明 `fipsCapable()` 的 Provider；没有 FIPS Provider 时启动失败。
 - **启动自检**校验 Provider；失败即 fail-closed。
 - **扩展信任**以模块实现类的完整类名为准，绝不信任自声明的 moduleId。

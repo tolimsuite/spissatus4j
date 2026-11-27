@@ -197,14 +197,118 @@ class UnifiedStarterIntegrationTest {
     }
 
     @Test
-    void unifiedEntryRejectsAsymmetricAlgorithms() {
+    void unifiedEntrySupportsAsymmetricBoundEnvelopes() {
         runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
             Spissatus facade = context.getBean(Spissatus.class);
             KeyId rsa = generate(facade, "unified-rsa", KeyType.RSA, AlgorithmId.RSA_OAEP);
-            assertThatThrownBy(() -> facade.encrypt(UnifiedEncryptRequest.builder(
-                            rsa, "asymmetric".getBytes(StandardCharsets.UTF_8), caller())
-                    .algorithm(AlgorithmId.RSA_OAEP).build()))
-                    .isInstanceOf(cn.tolim.spissatus4j.contract.exception.CryptoException.class);
+            byte[] plaintext = "asymmetric".getBytes(StandardCharsets.UTF_8);
+            UnifiedEncryptionResult result = facade.encrypt(UnifiedEncryptRequest.builder(
+                            rsa, plaintext, caller())
+                    .algorithm(AlgorithmId.RSA_OAEP).build());
+            assertThat(result.envelope().version()).isEqualTo(2);
+            assertThat(result.envelope().headerHash()).hasSize(32);
+            assertThat(result.envelope().tag()).isEmpty();
+
+            byte[] encoded = facade.envelopeService().encode(result.envelope(),
+                    EnvelopeFormat.JSON);
+            assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
+                    .isEqualTo(plaintext);
+            assertThat(facade.decryptEnvelope(encoded, caller())).isEqualTo(plaintext);
+
+            var tampered = result.envelope().toBuilder()
+                    .keyVersion(cn.tolim.spissatus4j.contract.key.KeyVersion.of(2)).build();
+            assertThatThrownBy(() -> facade.decrypt(UnifiedDecryptRequest.builder(
+                            facade.envelopeService().encode(tampered, EnvelopeFormat.JSON),
+                            caller()).build()))
+                    .isInstanceOfSatisfying(EnvelopeException.class,
+                            failure -> assertThat(failure.errorCode())
+                                    .isEqualTo(ErrorCode.ENVELOPE_BINDING_MISMATCH));
+
+            var rewritten = result.envelope().toBuilder()
+                    .attributes(Map.of("tampered", "value")).build();
+            var rebound = rewritten.toBuilder()
+                    .headerHash(cn.tolim.spissatus4j.contract.envelope.EnvelopeBinding
+                            .headerHash(rewritten)).build();
+            assertThatThrownBy(() -> facade.decrypt(UnifiedDecryptRequest.builder(
+                            facade.envelopeService().encode(rebound, EnvelopeFormat.JSON),
+                            caller()).build()))
+                    .isInstanceOfSatisfying(EnvelopeException.class,
+                            failure -> assertThat(failure.errorCode())
+                                    .isEqualTo(ErrorCode.ENVELOPE_BINDING_MISMATCH));
+        });
+    }
+
+    @Test
+    void automaticKeySelectionRequiresOperatorAndRequestOptIn() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            generate(facade, "auto-denied-aes", KeyType.AES, AlgorithmId.AES_GCM);
+            assertThatThrownBy(() -> facade.encrypt(UnifiedEncryptRequest.builderAutoKey(
+                            "auto denied".getBytes(StandardCharsets.UTF_8), caller()).build()))
+                    .isInstanceOfSatisfying(
+                            cn.tolim.spissatus4j.contract.exception.PolicyException.class,
+                            failure -> assertThat(failure.errorCode())
+                                    .isEqualTo(ErrorCode.POLICY_DENIED));
+        });
+        runner.withPropertyValues("spissatus.keys.provider=memory",
+                "spissatus.selection.allow-auto-key-selection=true").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            KeyId key = generate(facade, "auto-aes", KeyType.AES, AlgorithmId.AES_GCM);
+            byte[] plaintext = "automatic key".getBytes(StandardCharsets.UTF_8);
+            UnifiedEncryptionResult result = facade.encrypt(UnifiedEncryptRequest.builderAutoKey(
+                    plaintext, caller()).build());
+            assertThat(result.selection().selectedKeyId()).isEqualTo(key);
+            byte[] encoded = facade.envelopeService().encode(result.envelope(),
+                    EnvelopeFormat.JSON);
+            assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
+                    .isEqualTo(plaintext);
+        });
+    }
+
+    @Test
+    void deactivatedEncryptionRequiresOperatorAndRequestOptIn() {
+        runner.withPropertyValues("spissatus.keys.provider=memory").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            var key = facade.keyManager().generate(KeyGenerationRequest.builder(KeyType.AES,
+                            AlgorithmId.AES_GCM, Set.of(KeyUsage.ENCRYPT, KeyUsage.DECRYPT))
+                    .keyId(KeyId.of("deactivated-aes")).tenantId(caller().tenantId()).build(),
+                    caller());
+            facade.keyManager().deactivate(key.keyId(), key.version(), caller());
+            byte[] plaintext = "deactivated".getBytes(StandardCharsets.UTF_8);
+            assertThatThrownBy(() -> facade.encrypt(UnifiedEncryptRequest.builder(key.keyId(),
+                            plaintext, caller()).allowDeactivatedKey(true).build()))
+                    .isInstanceOfSatisfying(
+                            cn.tolim.spissatus4j.contract.exception.KeyException.class,
+                            failure -> assertThat(failure.errorCode())
+                                    .isEqualTo(ErrorCode.KEY_NOT_ACTIVE));
+        });
+        runner.withPropertyValues("spissatus.keys.provider=memory",
+                "spissatus.selection.allow-deactivated-encryption=true").run(context -> {
+            Spissatus facade = context.getBean(Spissatus.class);
+            var key = facade.keyManager().generate(KeyGenerationRequest.builder(KeyType.AES,
+                            AlgorithmId.AES_GCM, Set.of(KeyUsage.ENCRYPT, KeyUsage.DECRYPT))
+                    .keyId(KeyId.of("deactivated-opt-in-aes")).tenantId(caller().tenantId())
+                    .build(), caller());
+            facade.keyManager().deactivate(key.keyId(), key.version(), caller());
+            byte[] plaintext = "deactivated opt-in".getBytes(StandardCharsets.UTF_8);
+            assertThatThrownBy(() -> facade.encrypt(UnifiedEncryptRequest.builder(key.keyId(),
+                            plaintext, caller()).build()))
+                    .isInstanceOfSatisfying(
+                            cn.tolim.spissatus4j.contract.exception.KeyException.class,
+                            failure -> assertThat(failure.errorCode())
+                                    .isEqualTo(ErrorCode.KEY_NOT_ACTIVE));
+
+            UnifiedEncryptionResult result = facade.encrypt(UnifiedEncryptRequest.builder(
+                            key.keyId(), plaintext, caller())
+                    .allowDeactivatedKey(true).build());
+            assertThat(result.selection().selectedKeyId()).isEqualTo(key.keyId());
+            assertThat(facade.auditTrail().recent(50))
+                    .anyMatch(event -> event.type()
+                            == cn.tolim.spissatus4j.contract.audit.AuditEventType.KEY_STATE_OVERRIDE);
+            byte[] encoded = facade.envelopeService().encode(result.envelope(),
+                    EnvelopeFormat.JSON);
+            assertThat(facade.decrypt(UnifiedDecryptRequest.builder(encoded, caller()).build()))
+                    .isEqualTo(plaintext);
         });
     }
 

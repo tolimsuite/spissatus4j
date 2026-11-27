@@ -312,6 +312,8 @@ public class SpissatusProperties {
         private boolean allowExperimental;
         private boolean allowFamilyReuse;
         private boolean allowLegacyV1;
+        private boolean allowAutoKeySelection;
+        private boolean allowDeactivatedEncryption;
         private int maxCandidates = 32;
 
         public String getProfile() {
@@ -360,6 +362,22 @@ public class SpissatusProperties {
 
         public void setAllowLegacyV1(boolean allowLegacyV1) {
             this.allowLegacyV1 = allowLegacyV1;
+        }
+
+        public boolean isAllowAutoKeySelection() {
+            return allowAutoKeySelection;
+        }
+
+        public void setAllowAutoKeySelection(boolean allowAutoKeySelection) {
+            this.allowAutoKeySelection = allowAutoKeySelection;
+        }
+
+        public boolean isAllowDeactivatedEncryption() {
+            return allowDeactivatedEncryption;
+        }
+
+        public void setAllowDeactivatedEncryption(boolean allowDeactivatedEncryption) {
+            this.allowDeactivatedEncryption = allowDeactivatedEncryption;
         }
 
         public int getMaxCandidates() {

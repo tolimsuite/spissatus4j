@@ -1,5 +1,6 @@
 package cn.tolim.spissatus4j.core.facade;
 
+import cn.tolim.spissatus4j.contract.algorithm.AlgorithmFamily;
 import cn.tolim.spissatus4j.contract.algorithm.AlgorithmId;
 import cn.tolim.spissatus4j.contract.facade.Capabilities;
 import cn.tolim.spissatus4j.contract.facade.CryptoService;
@@ -260,11 +261,24 @@ public final class DefaultSpissatus implements Spissatus {
                 .tag(envelope.tag())
                 .aad(aad)
                 .build();
+        byte[] plaintext;
         try {
-            return crypto.decrypt(request);
+            plaintext = crypto.decrypt(request);
         } catch (CryptoException e) {
             throw DefaultUnifiedCryptoService.secureDecryptFailure(e);
         }
+        if (EnvelopeMetadataVerifier.isBound(envelope)
+                && envelope.algorithm().family() == AlgorithmFamily.ASYMMETRIC) {
+            try {
+                plaintext = EnvelopeMetadataVerifier.verifyAsymmetricPlaintext(envelope, plaintext);
+            } catch (RuntimeException e) {
+                auditBestEffort(caller, envelope.algorithm(), envelope.keyVersion(),
+                        AuditEventType.ENVELOPE_BINDING_FAILED, AuditOutcome.FAILURE,
+                        "Envelope metadata authentication failed");
+                throw e;
+            }
+        }
+        return plaintext;
     }
 
     private void auditBestEffort(CallerContext caller, AlgorithmId algorithm,

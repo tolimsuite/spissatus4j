@@ -131,6 +131,51 @@ class UnifiedEntryTest {
     }
 
     @Test
+    void automaticKeySelectionMakesOnePolicyDecision() {
+        AtomicInteger evaluations = new AtomicInteger();
+        PolicyEngine counting = new PolicyEngine() {
+            @Override
+            public String engineId() {
+                return "counting-auto";
+            }
+
+            @Override
+            public PolicyDecision evaluate(PolicyRequest request) {
+                evaluations.incrementAndGet();
+                return PolicyDecision.allow("counting-auto");
+            }
+
+            @Override
+            public HealthStatus health() {
+                return HealthStatus.UP;
+            }
+        };
+        try (Spissatus facade = SpissatusBuilders.builder()
+                .discoverModules(false)
+                .algorithmProvider(new TestAlgorithmProvider())
+                .keyManager(new TestKeyManager())
+                .envelopeService(new TestEnvelopeService())
+                .policyEngine(counting)
+                .setting("spissatus.selection.allow-auto-key-selection", "true")
+                .build()) {
+            UnifiedEncryptionResult result = facade.encrypt(
+                    UnifiedEncryptRequest.builderAutoKey(new byte[]{1, 2, 3}, CALLER).build());
+            assertEquals(TestKeyManager.KEY_ID, result.selection().selectedKeyId());
+            assertEquals(1, evaluations.get());
+        }
+    }
+
+    @Test
+    void automaticKeySelectionRequiresTheOperatorSetting() {
+        try (Spissatus facade = facade()) {
+            PolicyException failure = assertThrows(PolicyException.class,
+                    () -> facade.encrypt(UnifiedEncryptRequest.builderAutoKey(
+                            new byte[]{1}, CALLER).build()));
+            assertEquals(ErrorCode.POLICY_DENIED, failure.errorCode());
+        }
+    }
+
+    @Test
     void rejectsUnknownAndProhibitedExplicitAlgorithms() {
         try (Spissatus facade = facade()) {
             PolicyException prohibited = assertThrows(PolicyException.class,
